@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SocialPay MVP</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://unpkg.com/@zxing/browser@latest/umd/index.min.js"></script>
     <style>
         :root {
             --primary: #E35205;
@@ -230,21 +230,18 @@
             display: flex;
         }
 
-        #reader {
-            width: 100%;
-            max-width: 400px;
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-
         .scanner-actions {
             display: flex;
             flex-direction: column;
             gap: 10px;
             width: 100%;
             max-width: 400px;
+        }
+
+        @keyframes scanline {
+            0%   { top: 15%; }
+            50%  { top: 80%; }
+            100% { top: 15%; }
         }
 
         /* Ocultar textos por defecto del escáner (errores de frame) */
@@ -403,20 +400,20 @@
         </div>
         
         <div class="scanner-modal" id="scanner-modal">
-            <div style="position: relative; width: 100%; max-width: 400px; margin-bottom: 20px;">
-                <div id="reader" style="margin-bottom: 0;"></div>
-                <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px; pointer-events: none;">
-                    El escaneo es automático.<br><span style="color: var(--primary);">Acerca o aleja para enfocar.</span>
+            <div style="position: relative; width: 100%; max-width: 400px; margin-bottom: 20px; border-radius: 16px; overflow: hidden; background: #000;">
+                <video id="zxing-video" style="width: 100%; display: block; border-radius: 16px;"></video>
+                <!-- Animación línea roja -->
+                <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;">
+                    <div id="scan-line" style="position: absolute; left: 10%; right: 10%; height: 2px; background: rgba(255,0,0,0.8); box-shadow: 0 0 8px red; animation: scanline 2s linear infinite;"></div>
+                    <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px;">
+                        Apunta al código de barras<br><span style="color: var(--primary);">El escaneo es automático</span>
+                    </div>
                 </div>
-                <div style="position: absolute; top: 50%; left: 5%; right: 5%; height: 2px; background-color: rgba(255,0,0,0.6); box-shadow: 0 0 8px red; pointer-events: none;"></div>
             </div>
             <div class="scanner-actions">
-                <input type="file" id="barcode-file-input" accept="image/*" capture="environment" style="display: none;" onchange="handleBarcodeImageUpload(event)">
-                <button class="btn btn-primary" style="margin-bottom: 10px; background-color: var(--text-main);" onclick="document.getElementById('barcode-file-input').click()">📸 Plan B: Hacer foto al código</button>
                 <button class="btn btn-secondary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
             </div>
-            
             <!-- MAGIC BUTTON (Wizard of Oz) -->
             <!-- Tocar la esquina inferior derecha simula un escaneo exitoso instantáneo -->
             <div onclick="triggerMagicScan()" style="position: absolute; bottom: 0; right: 0; width: 60px; height: 60px; z-index: 9999;"></div>
@@ -501,7 +498,26 @@
             }, 3000);
         }
 
-        let html5QrCode = null;
+        let zxingReader = null;
+        let zxingControls = null;
+        let lastScanned = null;
+        let scanCooldown = false;
+
+        // Beep de audio generado por Web Audio API
+        function playBeep() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.frequency.value = 1200;
+                g.gain.setValueAtTime(0.3, ctx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+                o.start(ctx.currentTime);
+                o.stop(ctx.currentTime + 0.15);
+            } catch(e) {}
+        }
 
         function openScanner() {
             const superSelector = document.getElementById('supermarket').value;
@@ -509,78 +525,52 @@
                 showToast("⚠️ Por favor, selecciona un supermercado primero.");
                 return;
             }
-
             document.getElementById('scanner-modal').classList.add('show');
-            
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("reader");
+            startZxingScanner();
+        }
+
+        async function startZxingScanner() {
+            if (!zxingReader) {
+                zxingReader = new ZXingBrowser.BrowserMultiFormatReader();
             }
-            
-            html5QrCode.start(
-                { facingMode: "environment" },
-                {
-                    fps: 10,
-                    qrbox: { width: 250, height: 250 }
-                },
-                onScanSuccess,
-                onScanFailure
-            ).catch(err => {
-                console.error("Error al iniciar la cámara", err);
-                showToast("No se pudo iniciar la cámara.");
+
+            const videoEl = document.getElementById('zxing-video');
+            scanCooldown = false;
+
+            try {
+                const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+                // Preferimos la cámara trasera
+                const backCam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+                const deviceId = backCam ? backCam.deviceId : undefined;
+
+                zxingControls = await zxingReader.decodeFromVideoDevice(
+                    deviceId,
+                    videoEl,
+                    (result, err, controls) => {
+                        if (result && !scanCooldown) {
+                            scanCooldown = true;
+                            const barcode = result.getText();
+                            playBeep();
+                            if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100);
+                            closeScanner();
+                            processBarcode(barcode);
+                        }
+                    }
+                );
+            } catch (err) {
+                console.error("Error iniciando ZXing:", err);
+                showToast("❌ No se pudo acceder a la cámara.");
                 closeScanner();
-            });
+            }
         }
 
         function closeScanner() {
             document.getElementById('scanner-modal').classList.remove('show');
-            if (html5QrCode && html5QrCode.isScanning) {
-                html5QrCode.stop().then(() => {
-                    html5QrCode.clear();
-                }).catch(err => {
-                    console.error("Error al detener la cámara", err);
-                });
+            if (zxingControls) {
+                try { zxingControls.stop(); } catch(e) {}
+                zxingControls = null;
             }
-        }
-
-        async function handleBarcodeImageUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            // Mostrar estado de carga
-            showToast("Analizando foto en alta resolución...");
-            
-            // Cerramos la cámara en vivo si estaba abierta para liberar recursos
-            closeScanner();
-
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("reader");
-            }
-
-            try {
-                const result = await html5QrCode.scanFileV2(file, true);
-                if (result && result.decodedText) {
-                    console.log(`Código escaneado de foto: ${result.decodedText}`);
-                    if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
-                    processBarcode(result.decodedText);
-                } else {
-                    showToast("⚠️ No se encontró ningún código. Prueba a acercarte o usa la entrada manual.");
-                }
-            } catch (err) {
-                console.error("Error escaneando archivo: ", err);
-                showToast("⚠️ No se pudo leer el código de la foto. Prueba otra vez.");
-            }
-            
-            // Reset input file
-            event.target.value = '';
-        }
-
-        function triggerMagicScan() {
-            // Este es el truco para la demo. Simula haber leído una Coca-Cola.
-            // Puedes cambiar este número por el código de barras del producto real que lleves a la presentación.
-            const demoBarcode = "5449000000996"; 
-            if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
-            closeScanner();
-            processBarcode(demoBarcode);
+            scanCooldown = false;
         }
 
         function closeScannerAndManual() {
@@ -588,16 +578,14 @@
             scanManualProduct();
         }
 
-        function onScanSuccess(decodedText, decodedResult) {
-            console.log(`Código escaneado: ${decodedText}`);
-            // Reproducimos un pequeño beep simulado
-            if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
+        function triggerMagicScan() {
+            // Truco para la demo: toca la esquina inferior derecha del escáner.
+            // Cambia este código por el del producto que lleves a la presentación.
+            const demoBarcode = "5449000000996"; // Coca-Cola
+            playBeep();
+            if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100);
             closeScanner();
-            processBarcode(decodedText);
-        }
-
-        function onScanFailure(error) {
-            // Se ejecuta constantemente mientras busca código, se ignora.
+            processBarcode(demoBarcode);
         }
 
         function scanManualProduct() {
