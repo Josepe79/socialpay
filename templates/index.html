@@ -395,13 +395,28 @@
             <div style="position: relative; width: 100%; max-width: 400px; margin-bottom: 20px;">
                 <div id="reader" style="margin-bottom: 0;"></div>
                 <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px; pointer-events: none;">
-                    El escaneo es automático.<br><span style="color: var(--primary);">Toca la imagen para enfocar.</span>
+                    El escaneo es automático.<br><span style="color: var(--primary);">Acerca o aleja para enfocar.</span>
                 </div>
                 <div style="position: absolute; top: 50%; left: 5%; right: 5%; height: 2px; background-color: rgba(255,0,0,0.6); box-shadow: 0 0 8px red; pointer-events: none;"></div>
             </div>
             <div class="scanner-actions">
                 <button class="btn btn-primary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
+            </div>
+        </div>
+
+        <!-- Custom Price Modal -->
+        <div class="scanner-modal" id="price-modal">
+            <div style="background: white; padding: 24px; border-radius: 16px; width: 90%; max-width: 320px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <div style="font-size: 2rem; margin-bottom: 10px;">✅</div>
+                <h3 style="margin-bottom: 8px; color: var(--text-main);">Producto Aceptado</h3>
+                <p id="price-modal-product-name" style="color: var(--primary); font-weight: 600; margin-bottom: 16px;"></p>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px;">¿Qué precio marca en la estantería?</p>
+                <input type="number" id="price-input" step="0.01" placeholder="Ej: 2.50" style="width: 100%; padding: 12px; font-size: 1.2rem; text-align: center; border: 2px solid var(--border); border-radius: 8px; margin-bottom: 20px; outline: none;">
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-secondary" onclick="closePriceModal()" style="flex: 1;">Cancelar</button>
+                    <button class="btn btn-primary" onclick="submitPrice()" style="flex: 1;">Añadir</button>
+                </div>
             </div>
         </div>
 
@@ -499,7 +514,7 @@
         }
 
         async function processBarcode(barcodeInput) {
-            if (!barcodeInput) return; // Si el usuario cancela o lo deja vacío
+            if (!barcodeInput) return;
 
             const simulatedBarcode = barcodeInput.trim(); 
             try {
@@ -508,35 +523,46 @@
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                     },
-                    body: `barcode=${simulatedBarcode}`
+                    body: `barcode=${encodeURIComponent(simulatedBarcode)}`
                 });
                 
                 const data = await response.json();
                 
                 if (data.allowed) {
-                    // Pedimos al usuario que introduzca el precio marcado en la tienda
-                    let userPrice = prompt(`✅ Producto aceptado: ${data.name}\n¿Qué precio marca en la estantería? (Ej: 2.50)`, "2.50");
-                    
-                    if (!userPrice) return; // Si el usuario cancela, detenemos el proceso
-                    
-                    // Reemplazamos coma por punto por si lo escriben a la española y convertimos a número
-                    userPrice = parseFloat(userPrice.replace(',', '.'));
-                    
-                    if (isNaN(userPrice) || userPrice <= 0) {
-                        showToast("Precio introducido no válido.");
-                        return;
-                    }
-
-                    addProductToList(data.name, userPrice);
-                    currentCartItems.push({ name: data.name, price: userPrice });
-                    updateCartTotal(userPrice);
-                    showToast(`Añadido: ${data.name} por €${userPrice.toFixed(2)}`);
+                    pendingProductName = data.name;
+                    document.getElementById('price-modal-product-name').textContent = pendingProductName;
+                    document.getElementById('price-input').value = "";
+                    document.getElementById('price-modal').classList.add('show');
+                    setTimeout(() => document.getElementById('price-input').focus(), 100);
                 } else {
                     showToast(`Bloqueado: ${data.name} no está permitido.`);
                 }
             } catch (error) {
-                showToast("Error al escanear producto");
+                showToast("Error al procesar el código");
             }
+        }
+
+        function closePriceModal() {
+            document.getElementById('price-modal').classList.remove('show');
+            pendingProductName = "";
+        }
+
+        function submitPrice() {
+            let userPrice = document.getElementById('price-input').value;
+            if (!userPrice) return;
+            
+            userPrice = parseFloat(userPrice.replace(',', '.'));
+            
+            if (isNaN(userPrice) || userPrice <= 0) {
+                showToast("Precio introducido no válido.");
+                return;
+            }
+
+            addProductToList(pendingProductName, userPrice);
+            currentCartItems.push({ name: pendingProductName, price: userPrice });
+            updateCartTotal(userPrice);
+            showToast(`Añadido: ${pendingProductName} por €${userPrice.toFixed(2)}`);
+            closePriceModal();
         }
 
         async function handleFileUpload(event) {
