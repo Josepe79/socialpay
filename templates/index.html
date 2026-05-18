@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SocialPay MVP</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root {
             --primary: #E35205;
@@ -212,6 +213,40 @@
             line-height: 1.4;
         }
 
+        /* Scanner Modal */
+        .scanner-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .scanner-modal.show {
+            display: flex;
+        }
+
+        #reader {
+            width: 100%;
+            max-width: 400px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .scanner-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 400px;
+        }
+
         /* Loading Spinner */
         .spinner {
             display: none;
@@ -313,7 +348,7 @@
                     <div class="step-number">1</div>
                     <div class="step-text">Escanea los productos para que nuestro <strong>Motor de Reglas IA</strong> compruebe si son aptos y añade sus precios de estantería.</div>
                 </div>
-                <button class="btn btn-secondary" onclick="scanProduct()">
+                <button class="btn btn-secondary" onclick="openScanner()">
                     <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm14 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
                     Escanear Producto
                 </button>
@@ -349,6 +384,14 @@
             <div class="success-text">Pago Realizado</div>
         </div>
         
+        <div class="scanner-modal" id="scanner-modal">
+            <div id="reader"></div>
+            <div class="scanner-actions">
+                <button class="btn btn-primary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
+                <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
+            </div>
+        </div>
+
         <div class="toast" id="toast"></div>
         
         <div style="text-align: center; padding: 15px; font-size: 0.85rem; color: var(--text-muted); opacity: 0.8;">
@@ -382,13 +425,62 @@
             }, 3000);
         }
 
-        async function scanProduct() {
-            // Pedimos el código de barras al usuario interactuando con un prompt
+        let html5QrcodeScanner = null;
+
+        function openScanner() {
+            document.getElementById('scanner-modal').classList.add('show');
+            
+            if (!html5QrcodeScanner) {
+                // Configuramos el escáner para usar la cámara trasera y buscar preferiblemente formatos EAN
+                html5QrcodeScanner = new Html5QrcodeScanner(
+                    "reader",
+                    { 
+                        fps: 10, 
+                        qrbox: {width: 250, height: 150},
+                        formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E ]
+                    },
+                    /* verbose= */ false);
+                
+                html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+            }
+        }
+
+        function closeScanner() {
+            document.getElementById('scanner-modal').classList.remove('show');
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.clear().catch(error => {
+                    console.error("Failed to clear html5QrcodeScanner. ", error);
+                });
+                html5QrcodeScanner = null;
+            }
+        }
+
+        function closeScannerAndManual() {
+            closeScanner();
+            scanManualProduct();
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            console.log(`Código escaneado: ${decodedText}`);
+            // Reproducimos un pequeño beep simulado
+            if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
+            closeScanner();
+            processBarcode(decodedText);
+        }
+
+        function onScanFailure(error) {
+            // Se ejecuta constantemente mientras busca código, se ignora.
+        }
+
+        function scanManualProduct() {
             const barcodeInput = prompt(
                 "Introduce el código de barras (Ej:\n5449000000996 = Coca-Cola\n3017620422003 = Nutella\n8000500310427 = Ferrero Rocher):", 
                 "5449000000996"
             );
-            
+            processBarcode(barcodeInput);
+        }
+
+        async function processBarcode(barcodeInput) {
             if (!barcodeInput) return; // Si el usuario cancela o lo deja vacío
 
             const simulatedBarcode = barcodeInput.trim(); 
