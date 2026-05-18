@@ -704,24 +704,20 @@
 
             searchTimeout = setTimeout(async () => {
                 try {
-                    // world.openfoodfacts.org tiene CORS abierto. Pedimos el nombre en español.
-                    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(value)}&search_simple=1&action=process&json=1&page_size=8&fields=product_name,product_name_es,categories_tags`;
-                    const res = await fetch(url);
+                    // Llamamos al proxy backend para evitar CORS
+                    const res = await fetch(`/api/search?q=${encodeURIComponent(value)}`);
                     const data = await res.json();
-                    // Priorizamos el nombre en español si existe
-                    const products = (data.products || [])
-                        .map(p => ({ ...p, display_name: (p.product_name_es || p.product_name || '').trim() }))
-                        .filter(p => p.display_name !== '');
+                    const products = data.products || [];
 
                     if (products.length === 0) {
-                        dropdown.innerHTML = '<div style="padding: 14px 16px; color: rgba(255,255,255,0.4); font-size: 0.85rem;">Sin resultados. Prueba otro término.</div>';
+                        dropdown.innerHTML = '<div style="padding: 14px 16px; color: #6B7280; font-size: 0.85rem;">Sin resultados. Prueba otro término.</div>';
                         dropdown.style.display = 'block';
                         return;
                     }
 
                     dropdown.innerHTML = products.map(p => {
                         const icon = getCategoryIcon(p.categories_tags);
-                        const name = p.display_name;
+                        const name = p.name;
                         const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                         return `<div onclick="selectSearchProduct('${escaped}', '${icon}')"
                                      style="padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(0,0,0,0.06); color: var(--text-main); font-size: 0.9rem; transition: background 0.15s;"
@@ -734,6 +730,8 @@
                     dropdown.style.display = 'block';
                 } catch(e) {
                     console.error('Search error:', e);
+                    dropdown.innerHTML = '<div style="padding: 14px 16px; color: #EF4444; font-size: 0.85rem;">⚠️ Error de conexión. Prueba de nuevo.</div>';
+                    dropdown.style.display = 'block';
                 }
             }, 400);
         }

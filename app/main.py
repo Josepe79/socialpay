@@ -44,6 +44,34 @@ async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
     """Logs a manually searched product added to the cart."""
     return {"status": "success", "name": product_name, "price": price}
 
+@app.get("/api/search")
+async def search_products(q: str):
+    """Proxy de búsqueda a Open Food Facts para evitar problemas de CORS en el navegador."""
+    if not q or len(q) < 2:
+        return {"products": []}
+    try:
+        headers = {"User-Agent": "SocialPayMVP - Android - Version 1.0 - www.jepco.es"}
+        url = (
+            f"https://world.openfoodfacts.org/cgi/search.pl"
+            f"?search_terms={q}&search_simple=1&action=process&json=1"
+            f"&page_size=8&fields=product_name,product_name_es,categories_tags"
+        )
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code != 200:
+            return {"products": []}
+        data = response.json()
+        products = []
+        for p in data.get("products", []):
+            name = (p.get("product_name_es") or p.get("product_name") or "").strip()
+            if name:
+                products.append({
+                    "name": name,
+                    "categories_tags": p.get("categories_tags", [])
+                })
+        return {"products": products}
+    except Exception:
+        return {"products": []}
+
 @app.post("/upload-ticket")
 async def upload_ticket(
     ticket: UploadFile = File(...), 
