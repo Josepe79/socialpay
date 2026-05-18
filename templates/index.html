@@ -412,10 +412,33 @@
                     <button id="torch-btn" onclick="toggleTorch()" style="pointer-events: all; position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; cursor: pointer;">🔦</button>
                 </div>
             </div>
+            <!-- Buscador predictivo -->
+            <div id="product-search-section" style="width: 100%; max-width: 400px; margin-bottom: 12px;">
+                <p style="color: rgba(255,255,255,0.4); font-size: 0.7rem; text-align: center; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px;">― O BUSCA POR NOMBRE ―</p>
+                <div style="position: relative;">
+                    <input id="product-search-input" type="text" autocomplete="off" placeholder="Ej: Nutella, Leche, Coca-Cola..."
+                        oninput="onSearchInput(this.value)"
+                        style="width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.08); border: 1.5px solid rgba(255,255,255,0.15); border-radius: 12px; color: white; font-size: 0.95rem; outline: none; font-family: inherit; transition: border-color 0.2s;"
+                        onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
+                    <div id="search-dropdown" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1c1c1e; border: 1.5px solid #10B981; border-radius: 12px; max-height: 210px; overflow-y: auto; z-index: 1000;">
+                    </div>
+                </div>
+                <div id="search-price-section" style="display: none; flex-direction: column; margin-top: 12px; gap: 8px;">
+                    <p id="search-selected-name" style="color: #10B981; font-weight: 600; font-size: 0.9rem; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></p>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span style="color: rgba(255,255,255,0.5); font-size: 0.9rem; flex-shrink: 0;">€</span>
+                        <input id="search-price-input" type="number" step="0.01" min="0" placeholder="0.00"
+                            style="flex: 1; padding: 11px; background: rgba(255,255,255,0.08); border: 1.5px solid rgba(255,255,255,0.15); border-radius: 10px; color: white; font-size: 1.1rem; outline: none; text-align: center; font-family: inherit;"
+                            onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'"
+                            onkeydown="if(event.key==='Enter') addSearchProductToCart()">
+                        <button onclick="addSearchProductToCart()" style="background: #10B981; border: none; border-radius: 10px; width: 48px; height: 48px; color: white; font-size: 1.5rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 700;">+</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="scanner-actions">
                 <p style="color: rgba(255,255,255,0.6); font-size: 0.78rem; text-align: center; margin: 0 0 8px 0;">💡 En envases brillantes, inclina el móvil unos 15° para evitar reflejos.</p>
-                <button class="btn btn-secondary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
-                <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
+                <button class="btn btn-secondary" onclick="closeScanner()">Cerrar cámara</button>
             </div>
             <!-- MAGIC BUTTON (Wizard of Oz) -->
             <!-- Tocar la esquina inferior derecha simula un escaneo exitoso instantáneo -->
@@ -602,6 +625,127 @@
             closeScanner();
             scanManualProduct();
         }
+
+        // ── Predictive Search Logic ────────────────────────────────────────
+        let searchTimeout = null;
+        let selectedSearchProduct = null;
+
+        function getCategoryIcon(tags) {
+            if (!tags) return '🛒';
+            const t = tags.join(' ');
+            if (/beverages|drinks|soda|juice|water/.test(t)) return '🥤';
+            if (/dairy|milk|yogurt|cheese/.test(t)) return '🥛';
+            if (/bread|cereal|bakery|flour/.test(t)) return '🍞';
+            if (/fruit|vegetable|produce/.test(t)) return '🥦';
+            if (/meat|poultry|fish|seafood/.test(t)) return '🥩';
+            if (/snack|chip|crisps|nuts/.test(t)) return '🍿';
+            if (/chocolate|candy|sweet|dessert/.test(t)) return '🍫';
+            if (/sauce|condiment|ketchup|mayo/.test(t)) return '🫙';
+            if (/pasta|rice|noodle/.test(t)) return '🍝';
+            if (/frozen/.test(t)) return '🧊';
+            if (/coffee|tea/.test(t)) return '☕';
+            if (/oil|butter|fat/.test(t)) return '🧈';
+            if (/egg/.test(t)) return '🥚';
+            return '🛒';
+        }
+
+        async function onSearchInput(value) {
+            clearTimeout(searchTimeout);
+            const dropdown = document.getElementById('search-dropdown');
+            const priceSection = document.getElementById('search-price-section');
+
+            if (value.length < 2) {
+                dropdown.style.display = 'none';
+                priceSection.style.display = 'none';
+                selectedSearchProduct = null;
+                return;
+            }
+
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(value)}&search_simple=1&action=process&json=1&page_size=7&fields=product_name,categories_tags`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    const products = (data.products || []).filter(p => p.product_name && p.product_name.trim() !== '');
+
+                    if (products.length === 0) {
+                        dropdown.innerHTML = '<div style="padding: 14px 16px; color: rgba(255,255,255,0.4); font-size: 0.85rem;">Sin resultados. Prueba otro término.</div>';
+                        dropdown.style.display = 'block';
+                        return;
+                    }
+
+                    dropdown.innerHTML = products.map(p => {
+                        const icon = getCategoryIcon(p.categories_tags);
+                        const name = p.product_name.trim();
+                        const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        return `<div onclick="selectSearchProduct('${escaped}', '${icon}')"
+                                     style="padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); color: white; font-size: 0.9rem; transition: background 0.15s;"
+                                     onmouseover="this.style.background='rgba(16,185,129,0.15)'"
+                                     onmouseout="this.style.background='transparent'">
+                                    <span style="font-size: 1.3rem; flex-shrink: 0;">${icon}</span>
+                                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</span>
+                                </div>`;
+                    }).join('');
+                    dropdown.style.display = 'block';
+                } catch(e) {
+                    console.error('Search error:', e);
+                }
+            }, 400);
+        }
+
+        function selectSearchProduct(name, icon) {
+            selectedSearchProduct = { name, icon };
+            document.getElementById('product-search-input').value = name;
+            document.getElementById('search-dropdown').style.display = 'none';
+
+            const priceSection = document.getElementById('search-price-section');
+            document.getElementById('search-selected-name').textContent = `${icon} ${name}`;
+            priceSection.style.display = 'flex';
+            setTimeout(() => document.getElementById('search-price-input').focus(), 100);
+        }
+
+        async function addSearchProductToCart() {
+            if (!selectedSearchProduct) {
+                showToast('⚠️ Selecciona un producto del desplegable primero.');
+                return;
+            }
+            const rawPrice = document.getElementById('search-price-input').value;
+            if (!rawPrice) {
+                showToast('⚠️ Introduce el precio del producto.');
+                return;
+            }
+            const price = parseFloat(rawPrice.replace(',', '.'));
+            if (isNaN(price) || price <= 0) {
+                showToast('⚠️ Precio no válido.');
+                return;
+            }
+
+            const { name, icon } = selectedSearchProduct;
+            const displayName = `${icon} ${name}`;
+
+            addProductToList(displayName, price);
+            currentCartItems.push({ name: displayName, price });
+            updateCartTotal(price);
+            playBeep();
+            if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(80);
+            showToast(`✅ Añadido: ${name} · €${price.toFixed(2)}`);
+
+            // Log al backend
+            try {
+                const fd = new FormData();
+                fd.append('product_name', displayName);
+                fd.append('price', price);
+                await fetch('/scan/manual', { method: 'POST', body: fd });
+            } catch(e) {}
+
+            // Reset
+            document.getElementById('product-search-input').value = '';
+            document.getElementById('search-price-input').value = '';
+            document.getElementById('search-price-section').style.display = 'none';
+            selectedSearchProduct = null;
+            closeScanner();
+        }
+        // ── End Predictive Search ──────────────────────────────────────────
 
         function triggerMagicScan() {
             // Truco para la demo: toca la esquina inferior derecha del escáner.

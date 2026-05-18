@@ -39,6 +39,11 @@ async def scan_product(barcode: str = Form(...)):
     info = matcher.get_product_info(barcode)
     return info
 
+@app.post("/scan/manual")
+async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
+    """Logs a manually searched product added to the cart."""
+    return {"status": "success", "name": product_name, "price": price}
+
 @app.post("/upload-ticket")
 async def upload_ticket(
     ticket: UploadFile = File(...), 
