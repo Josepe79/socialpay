@@ -40,7 +40,12 @@ async def scan_product(barcode: str = Form(...)):
     return info
 
 @app.post("/upload-ticket")
-async def upload_ticket(ticket: UploadFile = File(...), cart_total: float = Form(...), cart_items: str = Form(...)):
+async def upload_ticket(
+    ticket: UploadFile = File(...), 
+    cart_total: float = Form(...), 
+    cart_items: str = Form(...),
+    supermarket: str = Form(...)
+):
     """Handles ticket upload, simulated OCR, and matching."""
     file_path = UPLOAD_DIR / ticket.filename
     with open(file_path, "wb") as buffer:
@@ -62,6 +67,7 @@ async def upload_ticket(ticket: UploadFile = File(...), cart_total: float = Form
         audit_record = {
             "transaction_id": str(uuid.uuid4()),
             "user_id": "USR-99X",
+            "supermarket": supermarket,
             "timestamp": datetime.now().isoformat(),
             "cart_snapshot": parsed_cart_items,
             "ticket_image_path": str(file_path.absolute()),

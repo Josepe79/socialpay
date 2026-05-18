@@ -114,13 +114,14 @@
                     <tr>
                         <th>Transacción ID</th>
                         <th>Fecha y Hora</th>
+                        <th>Establecimiento</th>
                         <th>Usuario</th>
                         <th>Carrito Validado</th>
                         <th>Estado</th>
                     </tr>
                 </thead>
                 <tbody id="logs-body">
-                    <tr><td colspan="5" class="empty-state">Cargando registros...</td></tr>
+                    <tr><td colspan="6" class="empty-state">Cargando registros...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -135,7 +136,7 @@
                 const tbody = document.getElementById('logs-body');
                 
                 if (data.logs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay transacciones registradas aún. Prueba a hacer una compra en el móvil.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay transacciones registradas aún. Prueba a hacer una compra en el móvil.</td></tr>';
                     return;
                 }
 
@@ -150,10 +151,14 @@
                     });
                     cartHtml += '</ul>';
 
+                    // Formatear nombre del supermercado
+                    const superName = log.supermarket ? log.supermarket.charAt(0).toUpperCase() + log.supermarket.slice(1) : 'No definido';
+
                     const row = `
                         <tr>
                             <td><span class="transaction-id">${log.transaction_id}</span></td>
                             <td>${date}</td>
+                            <td><strong>${superName}</strong></td>
                             <td>${log.user_id}</td>
                             <td>${cartHtml}</td>
                             <td><span class="status-badge">${log.status}</span></td>

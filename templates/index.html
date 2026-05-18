@@ -338,6 +338,17 @@
         </header>
 
         <div class="content">
+            <div class="card" id="supermarket-selector" style="margin-bottom: 20px;">
+                <label for="supermarket" style="font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; display: block; color: var(--primary);">📍 Selecciona tu supermercado:</label>
+                <select id="supermarket" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 1rem; outline: none; background: #F9FAFB; color: var(--text-main);">
+                    <option value="" disabled selected>Elige un supermercado...</option>
+                    <option value="mercadona">Mercadona</option>
+                    <option value="carrefour">Carrefour</option>
+                    <option value="ametller">Ametller Origen</option>
+                    <option value="dia">Dia</option>
+                </select>
+            </div>
+
             <div class="card">
                 <div class="cart-summary">
                     <div>
@@ -439,9 +450,40 @@
         function addProductToList(name, price) {
             const list = document.getElementById('product-list');
             const li = document.createElement('li');
+            const itemId = Date.now().toString() + Math.floor(Math.random() * 1000);
             li.className = 'product-item';
-            li.innerHTML = `<span>${name}</span> <span>€${price.toFixed(2)}</span>`;
+            li.id = `item-${itemId}`;
+            
+            li.innerHTML = `
+                <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                    <span style="flex-grow: 1; padding-right: 10px;">${name}</span> 
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-weight: 600;">€${price.toFixed(2)}</span>
+                        <button onclick="removeProduct('${itemId}', '${name.replace(/'/g, "\\'")}', ${price})" style="background: none; border: none; color: var(--danger); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>
+                        </button>
+                    </div>
+                </div>
+            `;
             list.appendChild(li);
+        }
+
+        function removeProduct(itemId, name, price) {
+            // Eliminar elemento del DOM
+            const element = document.getElementById(`item-${itemId}`);
+            if (element) {
+                element.remove();
+            }
+            
+            // Eliminar del array interno
+            const index = currentCartItems.findIndex(item => item.name === name && item.price === price);
+            if (index > -1) {
+                currentCartItems.splice(index, 1);
+            }
+            
+            // Restar del total
+            updateCartTotal(-price);
+            showToast(`Eliminado: ${name}`);
         }
 
         function showToast(message) {
@@ -456,6 +498,12 @@
         let html5QrCode = null;
 
         function openScanner() {
+            const superSelector = document.getElementById('supermarket').value;
+            if (!superSelector) {
+                showToast("⚠️ Por favor, selecciona un supermercado primero.");
+                return;
+            }
+
             document.getElementById('scanner-modal').classList.add('show');
             
             if (!html5QrCode) {
@@ -505,6 +553,11 @@
         }
 
         function scanManualProduct() {
+            const superSelector = document.getElementById('supermarket').value;
+            if (!superSelector) {
+                showToast("⚠️ Por favor, selecciona un supermercado primero.");
+                return;
+            }
             const barcodeInput = prompt(
                 "Introduce el código de barras (Ej:\n5449000000996 = Coca-Cola\n3017620422003 = Nutella\n8000500310427 = Ferrero Rocher):", 
                 "5449000000996"
@@ -568,6 +621,13 @@
             const file = event.target.files[0];
             if (!file) return;
 
+            const superSelector = document.getElementById('supermarket').value;
+            if (!superSelector) {
+                showToast("⚠️ Debes seleccionar un supermercado para auditar la compra.");
+                event.target.value = ''; // Reset
+                return;
+            }
+
             const btnValidate = document.getElementById('btn-validate');
             const spinner = document.getElementById('validate-spinner');
             
@@ -592,6 +652,7 @@
             formData.append('ticket', file);
             formData.append('cart_total', currentCartTotal);
             formData.append('cart_items', JSON.stringify(currentCartItems));
+            formData.append('supermarket', superSelector);
 
             try {
                 const response = await fetch('/upload-ticket', {
