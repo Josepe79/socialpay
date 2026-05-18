@@ -5,26 +5,43 @@ class ProductMatcher:
     def __init__(self):
         # URL base de la API de Open Food Facts
         self.off_url = "https://world.openfoodfacts.org/api/v0/product/"
+        # Caché en memoria para no repetir llamadas a OFF (evita 429)
+        self._cache = {}
 
     def get_product_info(self, barcode):
         """Consulta Open Food Facts para identificar el producto."""
+        # Devolvemos desde caché si ya lo consultamos antes
+        if barcode in self._cache:
+            return self._cache[barcode]
+
         try:
             headers = {"User-Agent": "SocialPayMVP - Android - Version 1.0 - www.jepco.es"}
             response = requests.get(f"{self.off_url}{barcode}.json", headers=headers, timeout=5)
+
+            if response.status_code == 429:
+                result = {"name": "Límite de consultas alcanzado. Espera unos segundos.", "allowed": True}
+                return result  # No guardamos en caché para poder reintentar
+
             if response.status_code == 200:
                 data = response.json()
                 if data.get('status') == 1:
                     product = data['product']
                     name = product.get('product_name', 'Producto desconocido')
                     categories = product.get('categories_tags', [])
-                    
+
                     # Lógica de bloqueo: No permitimos alcohol ni tabaco
                     is_allowed = not any(tag in categories for tag in ['en:alcoholic-beverages', 'en:tobacco'])
-                    
-                    return {"name": name, "allowed": is_allowed}
+
+                    result = {"name": name, "allowed": is_allowed}
                 else:
-                    return {"name": f"Producto no en base de datos (Status: {data.get('status')})", "allowed": True}
-            return {"name": f"Error HTTP {response.status_code} desde OFF", "allowed": True}
+                    result = {"name": f"Producto no en base de datos (Status: {data.get('status')})", "allowed": True}
+            else:
+                result = {"name": f"Error HTTP {response.status_code} desde OFF", "allowed": True}
+
+            # Guardamos en caché el resultado
+            self._cache[barcode] = result
+            return result
+
         except Exception as e:
             return {"name": f"Error interno: {str(e)}", "allowed": True}
 
