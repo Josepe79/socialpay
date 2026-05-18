@@ -361,12 +361,51 @@
             <div class="step-block">
                 <div class="step-header">
                     <div class="step-number">1</div>
-                    <div class="step-text">Escanea los productos para que nuestro <strong>Motor de Reglas IA</strong> compruebe si son aptos y añade sus precios de estantería.</div>
+                    <div class="step-text">Escanea los productos o búscalos por nombre. Nuestro <strong>Motor de Reglas IA</strong> comprueba si son aptos y añade sus precios de estantería.</div>
                 </div>
-                <button class="btn btn-secondary" onclick="openScanner()">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm14 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
-                    Escanear Producto
-                </button>
+
+                <!-- Tabs Escanear / Buscar -->
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button id="tab-scan" onclick="switchTab('scan')"
+                        style="flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(--primary); background: var(--primary); color: white; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;">
+                        📷 Escanear código
+                    </button>
+                    <button id="tab-search" onclick="switchTab('search')"
+                        style="flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;">
+                        🔍 Buscar nombre
+                    </button>
+                </div>
+
+                <!-- Panel de búsqueda predictiva (oculto por defecto) -->
+                <div id="search-panel" style="display: none;">
+                    <div style="position: relative; margin-bottom: 10px;">
+                        <input id="product-search-input" type="text" autocomplete="off" placeholder="Ej: Nutella, Leche, Coca-Cola..."
+                            oninput="onSearchInput(this.value)"
+                            style="width: 100%; padding: 12px 16px; background: #F9FAFB; border: 1.5px solid var(--border); border-radius: 12px; color: var(--text-main); font-size: 0.95rem; outline: none; font-family: inherit; transition: border-color 0.2s; box-sizing: border-box;"
+                            onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='var(--border)'">
+                        <div id="search-dropdown" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: white; border: 1.5px solid #10B981; border-radius: 12px; max-height: 220px; overflow-y: auto; z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.12);">
+                        </div>
+                    </div>
+                    <div id="search-price-section" style="display: none; flex-direction: column; gap: 8px; padding: 14px; background: #F0FDF4; border-radius: 12px; border: 1px solid #6EE7B7;">
+                        <p id="search-selected-name" style="color: #065F46; font-weight: 600; font-size: 0.9rem; margin: 0;"></p>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span style="color: var(--text-muted); font-size: 0.9rem; flex-shrink: 0;">€</span>
+                            <input id="search-price-input" type="number" step="0.01" min="0" placeholder="0.00"
+                                style="flex: 1; padding: 11px; background: white; border: 1.5px solid #6EE7B7; border-radius: 10px; color: var(--text-main); font-size: 1.1rem; outline: none; text-align: center; font-family: inherit;"
+                                onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='#6EE7B7'"
+                                onkeydown="if(event.key==='Enter') addSearchProductToCart()">
+                            <button onclick="addSearchProductToCart()" style="background: #10B981; border: none; border-radius: 10px; width: 48px; height: 48px; color: white; font-size: 1.5rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 700;">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Botón escanear (visible por defecto) -->
+                <div id="scan-panel">
+                    <button class="btn btn-secondary" onclick="openScanner()">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm14 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                        Escanear Producto
+                    </button>
+                </div>
             </div>
 
             <div class="step-block">
@@ -408,40 +447,15 @@
                     <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px;">
                         Apunta al código de barras<br><span style="color: var(--primary);">El escaneo es automático</span>
                     </div>
-                    <!-- Torch toggle button: pointer-events re-enabled just for this element -->
+                    <!-- Torch toggle button -->
                     <button id="torch-btn" onclick="toggleTorch()" style="pointer-events: all; position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; cursor: pointer;">🔦</button>
                 </div>
             </div>
-            <!-- Buscador predictivo -->
-            <div id="product-search-section" style="width: 100%; max-width: 400px; margin-bottom: 12px;">
-                <p style="color: rgba(255,255,255,0.4); font-size: 0.7rem; text-align: center; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px;">― O BUSCA POR NOMBRE ―</p>
-                <div style="position: relative;">
-                    <input id="product-search-input" type="text" autocomplete="off" placeholder="Ej: Nutella, Leche, Coca-Cola..."
-                        oninput="onSearchInput(this.value)"
-                        style="width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.08); border: 1.5px solid rgba(255,255,255,0.15); border-radius: 12px; color: white; font-size: 0.95rem; outline: none; font-family: inherit; transition: border-color 0.2s;"
-                        onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'">
-                    <div id="search-dropdown" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #1c1c1e; border: 1.5px solid #10B981; border-radius: 12px; max-height: 210px; overflow-y: auto; z-index: 1000;">
-                    </div>
-                </div>
-                <div id="search-price-section" style="display: none; flex-direction: column; margin-top: 12px; gap: 8px;">
-                    <p id="search-selected-name" style="color: #10B981; font-weight: 600; font-size: 0.9rem; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></p>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <span style="color: rgba(255,255,255,0.5); font-size: 0.9rem; flex-shrink: 0;">€</span>
-                        <input id="search-price-input" type="number" step="0.01" min="0" placeholder="0.00"
-                            style="flex: 1; padding: 11px; background: rgba(255,255,255,0.08); border: 1.5px solid rgba(255,255,255,0.15); border-radius: 10px; color: white; font-size: 1.1rem; outline: none; text-align: center; font-family: inherit;"
-                            onfocus="this.style.borderColor='#10B981'" onblur="this.style.borderColor='rgba(255,255,255,0.15)'"
-                            onkeydown="if(event.key==='Enter') addSearchProductToCart()">
-                        <button onclick="addSearchProductToCart()" style="background: #10B981; border: none; border-radius: 10px; width: 48px; height: 48px; color: white; font-size: 1.5rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 700;">+</button>
-                    </div>
-                </div>
-            </div>
-
             <div class="scanner-actions">
                 <p style="color: rgba(255,255,255,0.6); font-size: 0.78rem; text-align: center; margin: 0 0 8px 0;">💡 En envases brillantes, inclina el móvil unos 15° para evitar reflejos.</p>
                 <button class="btn btn-secondary" onclick="closeScanner()">Cerrar cámara</button>
             </div>
             <!-- MAGIC BUTTON (Wizard of Oz) -->
-            <!-- Tocar la esquina inferior derecha simula un escaneo exitoso instantáneo -->
             <div onclick="triggerMagicScan()" style="position: absolute; bottom: 0; right: 0; width: 60px; height: 60px; z-index: 9999;"></div>
         </div>
 
@@ -630,6 +644,32 @@
         let searchTimeout = null;
         let selectedSearchProduct = null;
 
+        function switchTab(tab) {
+            const scanPanel = document.getElementById('scan-panel');
+            const searchPanel = document.getElementById('search-panel');
+            const tabScan = document.getElementById('tab-scan');
+            const tabSearch = document.getElementById('tab-search');
+            const activeStyle = 'flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(--primary); background: var(--primary); color: white; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;';
+            const inactiveStyle = 'flex: 1; padding: 10px; border-radius: 10px; border: 2px solid var(--border); background: transparent; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;';
+
+            if (tab === 'scan') {
+                scanPanel.style.display = 'block';
+                searchPanel.style.display = 'none';
+                tabScan.style.cssText = activeStyle;
+                tabSearch.style.cssText = inactiveStyle;
+                // Close scanner camera if open
+                closeScanner();
+            } else {
+                scanPanel.style.display = 'none';
+                searchPanel.style.display = 'block';
+                tabScan.style.cssText = inactiveStyle;
+                tabSearch.style.cssText = activeStyle.replace('var(--primary)', '#10B981').replace('var(--primary)', '#10B981');
+                tabSearch.style.borderColor = '#10B981';
+                tabSearch.style.background = '#10B981';
+                setTimeout(() => document.getElementById('product-search-input').focus(), 100);
+            }
+        }
+
         function getCategoryIcon(tags) {
             if (!tags) return '🛒';
             const t = tags.join(' ');
@@ -663,7 +703,8 @@
 
             searchTimeout = setTimeout(async () => {
                 try {
-                    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(value)}&search_simple=1&action=process&json=1&page_size=7&fields=product_name,categories_tags`;
+                    // Usamos el endpoint español de OFF + filtros de idioma
+                    const url = `https://es.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(value)}&search_simple=1&action=process&json=1&page_size=7&fields=product_name,categories_tags&lc=es&cc=es`;
                     const res = await fetch(url);
                     const data = await res.json();
                     const products = (data.products || []).filter(p => p.product_name && p.product_name.trim() !== '');
@@ -743,7 +784,6 @@
             document.getElementById('search-price-input').value = '';
             document.getElementById('search-price-section').style.display = 'none';
             selectedSearchProduct = null;
-            closeScanner();
         }
         // ── End Predictive Search ──────────────────────────────────────────
 
