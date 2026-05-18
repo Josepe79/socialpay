@@ -432,33 +432,38 @@
             }, 3000);
         }
 
-        let html5QrcodeScanner = null;
+        let html5QrCode = null;
 
         function openScanner() {
             document.getElementById('scanner-modal').classList.add('show');
             
-            if (!html5QrcodeScanner) {
-                // Configuramos el escáner para usar SOLO la cámara en vivo
-                html5QrcodeScanner = new Html5QrcodeScanner(
-                    "reader",
-                    { 
-                        fps: 10, 
-                        qrbox: {width: 250, height: 150},
-                        supportedScanTypes: [ Html5QrcodeScanType.SCAN_TYPE_CAMERA ]
-                    },
-                    /* verbose= */ false);
-                
-                html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
             }
+            
+            html5QrCode.start(
+                { facingMode: "environment" },
+                {
+                    fps: 10,
+                    qrbox: { width: 250, height: 150 }
+                },
+                onScanSuccess,
+                onScanFailure
+            ).catch(err => {
+                console.error("Error al iniciar la cámara", err);
+                showToast("No se pudo iniciar la cámara.");
+                closeScanner();
+            });
         }
 
         function closeScanner() {
             document.getElementById('scanner-modal').classList.remove('show');
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.clear().catch(error => {
-                    console.error("Failed to clear html5QrcodeScanner. ", error);
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(() => {
+                    html5QrCode.clear();
+                }).catch(err => {
+                    console.error("Error al detener la cámara", err);
                 });
-                html5QrcodeScanner = null;
             }
         }
 
