@@ -392,7 +392,13 @@
         </div>
         
         <div class="scanner-modal" id="scanner-modal">
-            <div id="reader"></div>
+            <div style="position: relative; width: 100%; max-width: 400px; margin-bottom: 20px;">
+                <div id="reader" style="margin-bottom: 0;"></div>
+                <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px; pointer-events: none;">
+                    El escaneo es automático.<br><span style="color: var(--primary);">Toca la imagen para enfocar.</span>
+                </div>
+                <div style="position: absolute; top: 50%; left: 5%; right: 5%; height: 2px; background-color: rgba(255,0,0,0.6); box-shadow: 0 0 8px red; pointer-events: none;"></div>
+            </div>
             <div class="scanner-actions">
                 <button class="btn btn-primary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
