@@ -416,6 +416,10 @@
                 <button class="btn btn-secondary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
             </div>
+            
+            <!-- MAGIC BUTTON (Wizard of Oz) -->
+            <!-- Tocar la esquina inferior derecha simula un escaneo exitoso instantáneo -->
+            <div onclick="triggerMagicScan()" style="position: absolute; bottom: 0; right: 0; width: 60px; height: 60px; z-index: 9999;"></div>
         </div>
 
         <!-- Custom Price Modal -->
@@ -568,6 +572,15 @@
             
             // Reset input file
             event.target.value = '';
+        }
+
+        function triggerMagicScan() {
+            // Este es el truco para la demo. Simula haber leído una Coca-Cola.
+            // Puedes cambiar este número por el código de barras del producto real que lleves a la presentación.
+            const demoBarcode = "5449000000996"; 
+            if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
+            closeScanner();
+            processBarcode(demoBarcode);
         }
 
         function closeScannerAndManual() {
