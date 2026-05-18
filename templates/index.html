@@ -438,12 +438,13 @@
             document.getElementById('scanner-modal').classList.add('show');
             
             if (!html5QrcodeScanner) {
-                // Configuramos el escáner para usar la cámara trasera
+                // Configuramos el escáner para usar SOLO la cámara en vivo
                 html5QrcodeScanner = new Html5QrcodeScanner(
                     "reader",
                     { 
                         fps: 10, 
-                        qrbox: {width: 250, height: 150}
+                        qrbox: {width: 250, height: 150},
+                        supportedScanTypes: [ Html5QrcodeScanType.SCAN_TYPE_CAMERA ]
                     },
                     /* verbose= */ false);
                 
