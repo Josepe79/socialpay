@@ -408,9 +408,12 @@
                     <div style="position: absolute; top: 10px; left: 10px; right: 10px; text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 8px; font-size: 0.85rem; border-radius: 8px;">
                         Apunta al código de barras<br><span style="color: var(--primary);">El escaneo es automático</span>
                     </div>
+                    <!-- Torch toggle button: pointer-events re-enabled just for this element -->
+                    <button id="torch-btn" onclick="toggleTorch()" style="pointer-events: all; position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; cursor: pointer;">🔦</button>
                 </div>
             </div>
             <div class="scanner-actions">
+                <p style="color: rgba(255,255,255,0.6); font-size: 0.78rem; text-align: center; margin: 0 0 8px 0;">💡 En envases brillantes, inclina el móvil unos 15° para evitar reflejos.</p>
                 <button class="btn btn-secondary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
             </div>
@@ -561,11 +564,38 @@
 
         function closeScanner() {
             document.getElementById('scanner-modal').classList.remove('show');
+            // Apaga la linterna si está encendida
+            if (torchOn) toggleTorch();
             if (zxingControls) {
                 try { zxingControls.stop(); } catch(e) {}
                 zxingControls = null;
             }
             scanCooldown = false;
+        }
+
+        let torchOn = false;
+        async function toggleTorch() {
+            const videoEl = document.getElementById('zxing-video');
+            if (!videoEl || !videoEl.srcObject) {
+                showToast("La linterna solo está disponible con la cámara activa.");
+                return;
+            }
+            const track = videoEl.srcObject.getVideoTracks()[0];
+            if (!track) return;
+            const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+            if (!capabilities.torch) {
+                showToast("Tu navegador o dispositivo no soporta el control de linterna.");
+                return;
+            }
+            torchOn = !torchOn;
+            try {
+                await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+                document.getElementById('torch-btn').textContent = torchOn ? '🔕' : '🔦';
+                document.getElementById('torch-btn').style.background = torchOn ? 'rgba(255,200,0,0.7)' : 'rgba(0,0,0,0.6)';
+            } catch (e) {
+                showToast("No se pudo activar la linterna en este dispositivo.");
+                torchOn = false;
+            }
         }
 
         function closeScannerAndManual() {
