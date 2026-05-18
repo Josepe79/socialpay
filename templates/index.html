@@ -710,7 +710,8 @@
                     const products = data.products || [];
 
                     if (products.length === 0) {
-                        dropdown.innerHTML = '<div style="padding: 14px 16px; color: #6B7280; font-size: 0.85rem;">Sin resultados. Prueba otro término.</div>';
+                        const debugInfo = data.debug ? ` (${data.debug})` : '';
+                        dropdown.innerHTML = `<div style="padding: 14px 16px; color: #6B7280; font-size: 0.85rem;">Sin resultados${debugInfo}. Prueba otro término.</div>`;
                         dropdown.style.display = 'block';
                         return;
                     }

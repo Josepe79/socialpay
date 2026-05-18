@@ -46,31 +46,43 @@ async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
 
 @app.get("/api/search")
 async def search_products(q: str):
-    """Proxy de búsqueda a Open Food Facts para evitar problemas de CORS en el navegador."""
-    if not q or len(q) < 2:
+    """Proxy de búsqueda a Open Food Facts para evitar problemas de CORS."""
+    if not q or len(q.strip()) < 2:
         return {"products": []}
     try:
         headers = {"User-Agent": "SocialPayMVP - Android - Version 1.0 - www.jepco.es"}
-        url = (
-            f"https://world.openfoodfacts.org/cgi/search.pl"
-            f"?search_terms={q}&search_simple=1&action=process&json=1"
-            f"&page_size=8&fields=product_name,product_name_es,categories_tags"
+        params = {
+            "search_terms": q.strip(),
+            "search_simple": "1",
+            "action": "process",
+            "json": "1",
+            "page_size": "10",
+        }
+        response = requests.get(
+            "https://world.openfoodfacts.org/cgi/search.pl",
+            params=params,
+            headers=headers,
+            timeout=8
         )
-        response = requests.get(url, headers=headers, timeout=5)
+        print(f"[search] q={q!r} status={response.status_code}")
         if response.status_code != 200:
-            return {"products": []}
+            return {"products": [], "debug": f"OFF returned {response.status_code}"}
         data = response.json()
+        raw = data.get("products", [])
+        print(f"[search] raw products: {len(raw)}")
         products = []
-        for p in data.get("products", []):
+        for p in raw:
             name = (p.get("product_name_es") or p.get("product_name") or "").strip()
             if name:
                 products.append({
                     "name": name,
                     "categories_tags": p.get("categories_tags", [])
                 })
+        print(f"[search] filtered products: {len(products)}")
         return {"products": products}
-    except Exception:
-        return {"products": []}
+    except Exception as e:
+        print(f"[search] exception: {e}")
+        return {"products": [], "debug": str(e)}
 
 @app.post("/upload-ticket")
 async def upload_ticket(
