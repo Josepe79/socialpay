@@ -8,6 +8,7 @@ import sys
 import os
 import uuid
 import json
+import requests
 from datetime import datetime
 
 # Add parent directory to path so logic module can be imported
