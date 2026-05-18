@@ -45,9 +45,68 @@ async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
     """Logs a manually searched product added to the cart."""
     return {"status": "success", "name": product_name, "price": price}
 
+# Catálogo local de fallback para cuando OFF no está disponible
+LOCAL_CATALOG = [
+    {"name": "Leche entera Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
+    {"name": "Leche semi Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
+    {"name": "Leche desnatada Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
+    {"name": "Yogur natural Danone", "categories_tags": ["en:dairy", "en:yogurts"]},
+    {"name": "Mantequilla President", "categories_tags": ["en:dairy"]},
+    {"name": "Queso manchego El Ventero", "categories_tags": ["en:dairy", "en:cheese"]},
+    {"name": "Coca-Cola original 1.5L", "categories_tags": ["en:beverages", "en:soda"]},
+    {"name": "Coca-Cola Zero azúcar", "categories_tags": ["en:beverages", "en:soda"]},
+    {"name": "Agua mineral Bezoya 1.5L", "categories_tags": ["en:beverages", "en:water"]},
+    {"name": "Zumo de naranja Don Simón", "categories_tags": ["en:beverages", "en:juice"]},
+    {"name": "Cerveza Estrella Damm", "categories_tags": ["en:alcoholic-beverages", "en:beer"]},
+    {"name": "Vino tinto Marqués de Cáceres", "categories_tags": ["en:alcoholic-beverages", "en:wine"]},
+    {"name": "Aceite de oliva virgen extra Carbonell", "categories_tags": ["en:oils", "en:olive-oil"]},
+    {"name": "Aceite de girasol Hacendado", "categories_tags": ["en:oils"]},
+    {"name": "Arroz redondo Hacendado", "categories_tags": ["en:grains", "en:rice"]},
+    {"name": "Pasta espagueti Barilla nº5", "categories_tags": ["en:pasta"]},
+    {"name": "Pasta macarrones Gallo", "categories_tags": ["en:pasta"]},
+    {"name": "Harina de trigo Gallo", "categories_tags": ["en:bread", "en:flour"]},
+    {"name": "Pan de molde Bimbo", "categories_tags": ["en:bread", "en:bakery"]},
+    {"name": "Pan de molde integral Bimbo", "categories_tags": ["en:bread", "en:bakery"]},
+    {"name": "Galletas María Fontaneda", "categories_tags": ["en:snack", "en:biscuits"]},
+    {"name": "Galletas Oreo", "categories_tags": ["en:snack", "en:biscuits", "en:chocolate"]},
+    {"name": "Nutella 400g", "categories_tags": ["en:chocolate", "en:spreads"]},
+    {"name": "ColaCao original 400g", "categories_tags": ["en:beverages", "en:cocoa"]},
+    {"name": "Nesquik chocolate 400g", "categories_tags": ["en:beverages", "en:cocoa"]},
+    {"name": "Café molido Marcilla natural", "categories_tags": ["en:coffee", "en:beverages"]},
+    {"name": "Café Nescafé Classic", "categories_tags": ["en:coffee", "en:beverages"]},
+    {"name": "Azúcar blanco Hacendado 1kg", "categories_tags": ["en:sweeteners"]},
+    {"name": "Sal marina Hacendado", "categories_tags": ["en:condiments"]},
+    {"name": "Tomate frito Hacendado", "categories_tags": ["en:sauce", "en:condiment"]},
+    {"name": "Ketchup Heinz", "categories_tags": ["en:sauce", "en:condiment", "en:ketchup"]},
+    {"name": "Mayonesa Hellmann's", "categories_tags": ["en:sauce", "en:condiment", "en:mayo"]},
+    {"name": "Atún en aceite Calvo pack 3", "categories_tags": ["en:meat", "en:fish"]},
+    {"name": "Sardinas en aceite Hacendado", "categories_tags": ["en:meat", "en:fish"]},
+    {"name": "Jamón serrano lonchas Campofrío", "categories_tags": ["en:meat"]},
+    {"name": "Pechuga de pavo Campofrío", "categories_tags": ["en:meat", "en:poultry"]},
+    {"name": "Huevos camperos Hacendado 12u", "categories_tags": ["en:egg"]},
+    {"name": "Patatas fritas Lay's clásicas", "categories_tags": ["en:snack", "en:chip", "en:crisps"]},
+    {"name": "Patatas fritas Ruffles queso", "categories_tags": ["en:snack", "en:chip"]},
+    {"name": "Cacahuetes Hacendado tostados", "categories_tags": ["en:snack", "en:nuts"]},
+    {"name": "Chocolate negro Lindt 85%", "categories_tags": ["en:chocolate", "en:candy"]},
+    {"name": "Ferrero Rocher 16u", "categories_tags": ["en:chocolate", "en:candy", "en:sweet"]},
+    {"name": "Detergente Ariel polvo 40 lavados", "categories_tags": ["en:hygiene"]},
+    {"name": "Suavizante Mimosín azul", "categories_tags": ["en:hygiene"]},
+    {"name": "Papel higiénico Scottex 12u", "categories_tags": ["en:hygiene"]},
+    {"name": "Champú Pantene Pro-V", "categories_tags": ["en:hygiene"]},
+    {"name": "Gel de ducha Sanex", "categories_tags": ["en:hygiene"]},
+    {"name": "Pizza margarita Hacendado", "categories_tags": ["en:frozen"]},
+    {"name": "Guisantes congelados Hacendado", "categories_tags": ["en:frozen", "en:vegetables"]},
+    {"name": "Helado Magnum classic", "categories_tags": ["en:frozen", "en:dessert"]},
+]
+
+def search_local_catalog(query: str):
+    """Búsqueda local por substring, insensible a mayúsculas."""
+    q = query.lower().strip()
+    return [p for p in LOCAL_CATALOG if q in p["name"].lower()]
+
 @app.get("/api/search")
 async def search_products(q: str):
-    """Proxy de búsqueda a Open Food Facts para evitar problemas de CORS."""
+    """Proxy de búsqueda. Intenta OFF primero, usa catálogo local si falla."""
     if not q or len(q.strip()) < 2:
         return {"products": []}
     try:
@@ -63,27 +122,21 @@ async def search_products(q: str):
             "https://world.openfoodfacts.org/cgi/search.pl",
             params=params,
             headers=headers,
-            timeout=8
+            timeout=5
         )
-        print(f"[search] q={q!r} status={response.status_code}")
-        if response.status_code != 200:
-            return {"products": [], "debug": f"OFF returned {response.status_code}"}
-        data = response.json()
-        raw = data.get("products", [])
-        print(f"[search] raw products: {len(raw)}")
-        products = []
-        for p in raw:
-            name = (p.get("product_name_es") or p.get("product_name") or "").strip()
-            if name:
-                products.append({
-                    "name": name,
-                    "categories_tags": p.get("categories_tags", [])
-                })
-        print(f"[search] filtered products: {len(products)}")
-        return {"products": products}
-    except Exception as e:
-        print(f"[search] exception: {e}")
-        return {"products": [], "debug": str(e)}
+        if response.status_code == 200:
+            data = response.json()
+            products = []
+            for p in data.get("products", []):
+                name = (p.get("product_name_es") or p.get("product_name") or "").strip()
+                if name:
+                    products.append({"name": name, "categories_tags": p.get("categories_tags", [])})
+            if products:
+                return {"products": products, "source": "off"}
+        # Fallback catálogo local
+        return {"products": search_local_catalog(q), "source": "local"}
+    except Exception:
+        return {"products": search_local_catalog(q), "source": "local"}
 
 @app.post("/upload-ticket")
 async def upload_ticket(
