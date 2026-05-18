@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SocialPay MVP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #E35205;
+            --primary-hover: #D04500;
+            --success: #10B981;
+            --success-light: #D1FAE5;
+            --danger: #EF4444;
+            --background: #F3F4F6;
+            --surface: #FFFFFF;
+            --text-main: #111827;
+            --text-muted: #6B7280;
+            --border: #E5E7EB;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .mobile-container {
+            width: 100%;
+            max-width: 480px;
+            background-color: var(--surface);
+            min-height: 100vh;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            padding: 24px 20px;
+            background: linear-gradient(135deg, var(--primary), #818CF8);
+            color: white;
+            text-align: center;
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .content {
+            padding: 24px 20px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            border: 1px solid var(--border);
+        }
+
+        .cart-summary {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .total-amount {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .product-list {
+            list-style: none;
+            margin-top: 15px;
+            border-top: 1px solid var(--border);
+            padding-top: 15px;
+        }
+
+        .product-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 14px 20px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background-color: white;
+            color: var(--text-main);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background-color: #F9FAFB;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-pay {
+            background-color: var(--success);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+            opacity: 0.5;
+            pointer-events: none;
+            transform: scale(0.98);
+        }
+
+        .btn-pay.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        /* Tooltip & Info Icon */
+        .step-block {
+            margin-bottom: 16px;
+        }
+        
+        .step-block.mt-auto {
+            margin-top: auto;
+            margin-bottom: 24px;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 10px;
+            padding: 0 4px;
+        }
+
+        .step-number {
+            background-color: var(--primary);
+            color: white;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .step-text {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Success Overlay */
+        .success-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--success);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
+        .success-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .success-icon {
+            font-size: 5rem;
+            margin-bottom: 20px;
+            transform: scale(0);
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .success-overlay.show .success-icon {
+            transform: scale(1);
+        }
+
+        .success-text {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        #file-input {
+            display: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--text-main);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: transform 0.3s ease;
+            z-index: 50;
+        }
+        
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="mobile-container">
+        <header>
+            <h1>SocialPay</h1>
+        </header>
+
+        <div class="content">
+            <div class="card">
+                <div class="cart-summary">
+                    <div>
+                        <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 4px;">Total a pagar</div>
+                        <div class="total-amount" id="cart-total">€0.00</div>
+                    </div>
+                </div>
+                <ul class="product-list" id="product-list">
+                    <!-- Products will be added here dynamically -->
+                </ul>
+            </div>
+
+            <div class="step-block">
+                <div class="step-header">
+                    <div class="step-number">1</div>
+                    <div class="step-text">Escanea los productos para que nuestro <strong>Motor de Reglas IA</strong> compruebe si son aptos y añade sus precios de estantería.</div>
+                </div>
+                <button class="btn btn-secondary" onclick="scanProduct()">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm14 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                    Escanear Producto
+                </button>
+            </div>
+
+            <div class="step-block">
+                <div class="step-header">
+                    <div class="step-number">2</div>
+                    <div class="step-text">Haz una foto al pre-ticket de la caja. El <strong>motor OCR</strong> verificará el total para evitar fraudes en el importe.</div>
+                </div>
+                <button class="btn btn-primary" id="btn-validate" onclick="document.getElementById('file-input').click()">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Validar Preticket
+                    <div class="spinner" id="validate-spinner"></div>
+                </button>
+            </div>
+            <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(event)">
+
+            <div class="step-block mt-auto">
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <div class="step-text">Si coincide, se libera el pago virtual y se genera un <strong>registro inmutable FSE+</strong> para la empresa y la administración.</div>
+                </div>
+                <button class="btn btn-pay" id="btn-pay" onclick="activatePayment()">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Activar Pago
+                </button>
+            </div>
+        </div>
+
+        <div class="success-overlay" id="success-overlay">
+            <div class="success-icon">✓</div>
+            <div class="success-text">Pago Realizado</div>
+        </div>
+        
+        <div class="toast" id="toast"></div>
+        
+        <div style="text-align: center; padding: 15px; font-size: 0.85rem; color: var(--text-muted); opacity: 0.8;">
+            Powered by <strong style="color: var(--primary);">Up Spain</strong>
+        </div>
+    </div>
+
+    <script>
+        let currentCartTotal = 0.00;
+        let currentCartItems = [];
+
+        function updateCartTotal(amount) {
+            currentCartTotal += amount;
+            document.getElementById('cart-total').textContent = `€${currentCartTotal.toFixed(2)}`;
+        }
+
+        function addProductToList(name, price) {
+            const list = document.getElementById('product-list');
+            const li = document.createElement('li');
+            li.className = 'product-item';
+            li.innerHTML = `<span>${name}</span> <span>€${price.toFixed(2)}</span>`;
+            list.appendChild(li);
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        async function scanProduct() {
+            // Pedimos el código de barras al usuario interactuando con un prompt
+            const barcodeInput = prompt(
+                "Introduce el código de barras (Ej:\n5449000000996 = Coca-Cola\n3017620422003 = Nutella\n8000500310427 = Ferrero Rocher):", 
+                "5449000000996"
+            );
+            
+            if (!barcodeInput) return; // Si el usuario cancela o lo deja vacío
+
+            const simulatedBarcode = barcodeInput.trim(); 
+            try {
+                const response = await fetch('/scan-product', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `barcode=${simulatedBarcode}`
+                });
+                
+                const data = await response.json();
+                
+                if (data.allowed) {
+                    // Pedimos al usuario que introduzca el precio marcado en la tienda
+                    let userPrice = prompt(`✅ Producto aceptado: ${data.name}\n¿Qué precio marca en la estantería? (Ej: 2.50)`, "2.50");
+                    
+                    if (!userPrice) return; // Si el usuario cancela, detenemos el proceso
+                    
+                    // Reemplazamos coma por punto por si lo escriben a la española y convertimos a número
+                    userPrice = parseFloat(userPrice.replace(',', '.'));
+                    
+                    if (isNaN(userPrice) || userPrice <= 0) {
+                        showToast("Precio introducido no válido.");
+                        return;
+                    }
+
+                    addProductToList(data.name, userPrice);
+                    currentCartItems.push({ name: data.name, price: userPrice });
+                    updateCartTotal(userPrice);
+                    showToast(`Añadido: ${data.name} por €${userPrice.toFixed(2)}`);
+                } else {
+                    showToast(`Bloqueado: ${data.name} no está permitido.`);
+                }
+            } catch (error) {
+                showToast("Error al escanear producto");
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const btnValidate = document.getElementById('btn-validate');
+            const spinner = document.getElementById('validate-spinner');
+            
+            // UI Loading state
+            btnValidate.disabled = true;
+            spinner.style.display = 'block';
+            
+            // Secuencia de animación de OCR simulada
+            const statuses = [
+                " Subiendo imagen... ",
+                " Extrayendo texto (OCR)... ",
+                " Comprobando importes... "
+            ];
+            
+            for (let i = 0; i < statuses.length; i++) {
+                btnValidate.childNodes[2].textContent = statuses[i];
+                // Esperamos 1.5 segundos en cada paso para darle más realismo a la demo
+                await new Promise(r => setTimeout(r, 1500)); 
+            }
+
+            const formData = new FormData();
+            formData.append('ticket', file);
+            formData.append('cart_total', currentCartTotal);
+            formData.append('cart_items', JSON.stringify(currentCartItems));
+
+            try {
+                const response = await fetch('/upload-ticket', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    document.getElementById('btn-pay').classList.add('active');
+                } else {
+                    showToast(data.message || 'Error en la validación');
+                }
+            } catch (error) {
+                console.error("Error uploading ticket:", error);
+                showToast("Error de conexión");
+            } finally {
+                // Restore UI
+                btnValidate.disabled = false;
+                spinner.style.display = 'none';
+                btnValidate.childNodes[2].textContent = ' Validar Preticket ';
+                event.target.value = ''; // Reset file input
+            }
+        }
+
+        function activatePayment() {
+            const overlay = document.getElementById('success-overlay');
+            overlay.classList.add('show');
+            
+            setTimeout(() => {
+                overlay.classList.remove('show');
+                // Reset flow
+                document.getElementById('btn-pay').classList.remove('active');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

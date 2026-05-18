@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Auditoría - FSE+</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #E35205; /* Up Spain Orange */
+            --background: #F3F4F6;
+            --surface: #FFFFFF;
+            --text-main: #111827;
+            --text-muted: #6B7280;
+            --border: #E5E7EB;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+        }
+
+        .header {
+            background-color: var(--surface);
+            padding: 20px 40px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--primary);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background-color: var(--surface);
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: #F9FAFB;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        .status-badge {
+            background-color: #D1FAE5;
+            color: #065F46;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .transaction-id {
+            font-family: monospace;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .cart-list {
+            margin: 0;
+            padding-left: 20px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Control de Auditoría FSE+</h1>
+        <div style="font-size: 0.9rem; color: var(--text-muted);">
+            Powered by <strong>Up Spain</strong>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Transacción ID</th>
+                        <th>Fecha y Hora</th>
+                        <th>Usuario</th>
+                        <th>Carrito Validado</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="logs-body">
+                    <tr><td colspan="5" class="empty-state">Cargando registros...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/admin/audit-logs');
+                const data = await response.json();
+                
+                const tbody = document.getElementById('logs-body');
+                
+                if (data.logs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay transacciones registradas aún. Prueba a hacer una compra en el móvil.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = '';
+                
+                data.logs.forEach(log => {
+                    const date = new Date(log.timestamp).toLocaleString('es-ES');
+                    
+                    let cartHtml = '<ul class="cart-list">';
+                    log.cart_snapshot.forEach(item => {
+                        cartHtml += `<li>${item.name} - €${item.price.toFixed(2)}</li>`;
+                    });
+                    cartHtml += '</ul>';
+
+                    const row = `
+                        <tr>
+                            <td><span class="transaction-id">${log.transaction_id}</span></td>
+                            <td>${date}</td>
+                            <td>${log.user_id}</td>
+                            <td>${cartHtml}</td>
+                            <td><span class="status-badge">${log.status}</span></td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            } catch (error) {
+                console.error("Error cargando auditoría", error);
+            }
+        }
+
+        // Cargar al inicio
+        fetchLogs();
+    </script>
+</body>
+</html>
