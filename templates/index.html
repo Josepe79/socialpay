@@ -411,7 +411,9 @@
                 <div style="position: absolute; top: 50%; left: 5%; right: 5%; height: 2px; background-color: rgba(255,0,0,0.6); box-shadow: 0 0 8px red; pointer-events: none;"></div>
             </div>
             <div class="scanner-actions">
-                <button class="btn btn-primary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
+                <input type="file" id="barcode-file-input" accept="image/*" capture="environment" style="display: none;" onchange="handleBarcodeImageUpload(event)">
+                <button class="btn btn-primary" style="margin-bottom: 10px; background-color: var(--text-main);" onclick="document.getElementById('barcode-file-input').click()">📸 Plan B: Hacer foto al código</button>
+                <button class="btn btn-secondary" onclick="closeScannerAndManual()">📝 Ingresar código manualmente</button>
                 <button class="btn btn-secondary" style="border:none; background:transparent; color:white; margin-top:10px;" onclick="closeScanner()">Cancelar escaneo</button>
             </div>
         </div>
@@ -534,6 +536,38 @@
                     console.error("Error al detener la cámara", err);
                 });
             }
+        }
+
+        async function handleBarcodeImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Mostrar estado de carga
+            showToast("Analizando foto en alta resolución...");
+            
+            // Cerramos la cámara en vivo si estaba abierta para liberar recursos
+            closeScanner();
+
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
+            }
+
+            try {
+                const result = await html5QrCode.scanFileV2(file, true);
+                if (result && result.decodedText) {
+                    console.log(`Código escaneado de foto: ${result.decodedText}`);
+                    if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(100); }
+                    processBarcode(result.decodedText);
+                } else {
+                    showToast("⚠️ No se encontró ningún código. Prueba a acercarte o usa la entrada manual.");
+                }
+            } catch (err) {
+                console.error("Error escaneando archivo: ", err);
+                showToast("⚠️ No se pudo leer el código de la foto. Prueba otra vez.");
+            }
+            
+            // Reset input file
+            event.target.value = '';
         }
 
         function closeScannerAndManual() {
