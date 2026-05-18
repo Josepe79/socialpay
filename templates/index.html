@@ -247,6 +247,13 @@
             max-width: 400px;
         }
 
+        /* Ocultar textos por defecto del escáner (errores de frame) */
+        #reader__dashboard_section_csr span,
+        #reader__status_span,
+        #reader__header_message {
+            display: none !important;
+        }
+
         /* Loading Spinner */
         .spinner {
             display: none;
@@ -431,13 +438,12 @@
             document.getElementById('scanner-modal').classList.add('show');
             
             if (!html5QrcodeScanner) {
-                // Configuramos el escáner para usar la cámara trasera y buscar preferiblemente formatos EAN
+                // Configuramos el escáner para usar la cámara trasera
                 html5QrcodeScanner = new Html5QrcodeScanner(
                     "reader",
                     { 
                         fps: 10, 
-                        qrbox: {width: 250, height: 150},
-                        formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E ]
+                        qrbox: {width: 250, height: 150}
                     },
                     /* verbose= */ false);
                 
