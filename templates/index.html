@@ -463,7 +463,10 @@
             }
             
             html5QrCode.start(
-                { facingMode: "environment" },
+                { 
+                    facingMode: "environment",
+                    advanced: [{ focusMode: "continuous" }]
+                },
                 {
                     fps: 30,
                     qrbox: { width: 300, height: 150 }
