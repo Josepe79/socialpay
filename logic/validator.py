@@ -10,7 +10,47 @@ class TicketValidator:
         """Returns a similarity score between 0 and 1 for two strings."""
         if not name_a or not name_b:
             return 0.0
-        return difflib.SequenceMatcher(None, name_a.lower(), name_b.lower()).ratio()
+            
+        import unicodedata
+        def norm(s):
+            # Normalize: remove accents, lowercase, strip
+            s = unicodedata.normalize("NFD", s.lower())
+            return "".join(c for c in s if unicodedata.category(c) != "Mn").strip()
+            
+        a = norm(name_a)
+        b = norm(name_b)
+        
+        # Standard ratio
+        ratio = difflib.SequenceMatcher(None, a, b).ratio()
+        
+        # Word-based checks
+        words_a = [w for w in a.split() if len(w) > 2] # ignore short words like "de", "con"
+        words_b = [w for w in b.split() if len(w) > 2]
+        
+        if not words_a or not words_b:
+            return ratio
+            
+        # Check prefix of words (e.g. "llentia cuita")
+        min_words = min(len(words_a), len(words_b))
+        prefix_matches = 0
+        for i in range(min(min_words, 3)): # check up to first 3 words
+            if words_a[i] == words_b[i]:
+                prefix_matches += 1
+            else:
+                break
+                
+        if prefix_matches >= 2:
+            # High boost if first 2+ words match (e.g. "Llentia cuita")
+            return max(ratio, 0.85)
+            
+        # Also check word intersection (e.g. "Tomate frito" and "Frito tomate")
+        set_a = set(words_a)
+        set_b = set(words_b)
+        intersection = set_a.intersection(set_b)
+        if len(intersection) >= 2:
+            return max(ratio, 0.80)
+            
+        return ratio
 
     def validate(self, cart_items: list, cart_total: float, ticket_data: dict) -> dict:
         """
