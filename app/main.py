@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, File, UploadFile, Form
+from fastapi import FastAPI, Request, File, UploadFile, Form, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -8,7 +8,10 @@ import sys
 import os
 import uuid
 import json
+import unicodedata
 import requests
+import psycopg2
+import psycopg2.extras
 from datetime import datetime
 
 # Add parent directory to path so logic module can be imported
@@ -23,11 +26,302 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
 matcher = ProductMatcher()
 
-# Base de datos simulada en memoria para auditoría FSE+
+# ── Auditoría en memoria (persiste mientras el proceso esté vivo) ─────────────
 db_auditoria = []
+
+# ── PostgreSQL ─────────────────────────────────────────────────────────────────
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+def get_conn():
+    """Devuelve una conexión psycopg2 nueva."""
+    url = DATABASE_URL
+    # Railway usa postgres://, psycopg2 necesita postgresql://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(url)
+
+def normalize(s: str) -> str:
+    return unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode()
+
+# Catálogo semilla — se carga en DB al arrancar si está vacía
+SEED_CATALOG = [
+    # Lácteos
+    ("seed-lac-001", "Leche entera Hacendado",          "dairy"),
+    ("seed-lac-002", "Leche semidesnatada Hacendado",   "dairy"),
+    ("seed-lac-003", "Leche desnatada Hacendado",       "dairy"),
+    ("seed-lac-004", "Leche sin lactosa Hacendado",     "dairy"),
+    ("seed-lac-005", "Yogur natural Danone",            "dairy"),
+    ("seed-lac-006", "Yogur griego Fage 0%",            "dairy"),
+    ("seed-lac-007", "Mantequilla President",           "dairy"),
+    ("seed-lac-008", "Queso manchego El Ventero",       "dairy"),
+    ("seed-lac-009", "Queso fresco Hacendado",          "dairy"),
+    ("seed-lac-010", "Nata para cocinar Hacendado",     "dairy"),
+    # Bebidas
+    ("seed-beb-001", "Coca-Cola original 1.5L",         "beverages"),
+    ("seed-beb-002", "Coca-Cola Zero azúcar 1.5L",      "beverages"),
+    ("seed-beb-003", "Agua mineral Bezoya 1.5L",        "beverages"),
+    ("seed-beb-004", "Agua mineral Hacendado 6x1.5L",   "beverages"),
+    ("seed-beb-005", "Zumo de naranja Don Simón 1L",    "beverages"),
+    ("seed-beb-006", "Cerveza Estrella Damm lata",      "alcoholic-beverages"),
+    ("seed-beb-007", "Vino tinto Marqués de Cáceres",   "alcoholic-beverages"),
+    # Aceites y condimentos
+    ("seed-ace-001", "Aceite de oliva virgen extra Carbonell", "oils"),
+    ("seed-ace-002", "Aceite de girasol Hacendado",     "oils"),
+    ("seed-ace-003", "Vinagre de Jerez Hacendado",      "condiments"),
+    ("seed-ace-004", "Sal marina Hacendado 1kg",        "condiments"),
+    ("seed-ace-005", "Azúcar blanco Hacendado 1kg",     "sweeteners"),
+    ("seed-ace-006", "Azúcar moreno Hacendado 1kg",     "sweeteners"),
+    # Pasta, arroz y cereales
+    ("seed-pas-001", "Arroz redondo Hacendado 1kg",     "grains"),
+    ("seed-pas-002", "Pasta espagueti Barilla nº5",     "pasta"),
+    ("seed-pas-003", "Pasta macarrones Gallo",          "pasta"),
+    ("seed-pas-004", "Pasta fusilli Hacendado",         "pasta"),
+    ("seed-pas-005", "Harina de trigo Gallo 1kg",       "bread"),
+    ("seed-pas-006", "Cereales Corn Flakes Kellogg's",  "cereals"),
+    ("seed-pas-007", "Avena Quaker Oats 500g",          "cereals"),
+    # Pan y bollería
+    ("seed-pan-001", "Pan de molde Bimbo blanco",       "bakery"),
+    ("seed-pan-002", "Pan de molde integral Bimbo",     "bakery"),
+    ("seed-pan-003", "Croissants Hacendado pack 4",     "bakery"),
+    # Galletas y snacks
+    ("seed-gal-001", "Galletas María Fontaneda 800g",   "snack"),
+    ("seed-gal-002", "Galletas Oreo pack",              "snack"),
+    ("seed-gal-003", "Galletas digestive McVitie's",    "snack"),
+    ("seed-gal-004", "Patatas fritas Lay's clásicas",   "snack"),
+    ("seed-gal-005", "Patatas fritas Ruffles queso",    "snack"),
+    ("seed-gal-006", "Nachos Hacendado con sal",        "snack"),
+    ("seed-gal-007", "Cacahuetes Hacendado tostados",   "snack"),
+    # Chocolate y dulces
+    ("seed-cho-001", "Nutella 400g",                    "chocolate"),
+    ("seed-cho-002", "ColaCao original 400g",           "cocoa"),
+    ("seed-cho-003", "Nesquik chocolate 400g",          "cocoa"),
+    ("seed-cho-004", "Chocolate negro Lindt 85%",       "chocolate"),
+    ("seed-cho-005", "Ferrero Rocher 16u",              "chocolate"),
+    ("seed-cho-006", "Kit Kat Nestlé 2u",               "chocolate"),
+    ("seed-cho-007", "Kinder Bueno 2u",                 "chocolate"),
+    # Café e infusiones
+    ("seed-caf-001", "Café molido Marcilla natural",    "coffee"),
+    ("seed-caf-002", "Café Nescafé Classic",            "coffee"),
+    ("seed-caf-003", "Té verde Hacendado",              "tea"),
+    # Salsas y conservas
+    ("seed-sal-001", "Tomate frito Hacendado 400g",     "sauce"),
+    ("seed-sal-002", "Ketchup Heinz 460g",              "sauce"),
+    ("seed-sal-003", "Mayonesa Hellmann's 430ml",       "sauce"),
+    ("seed-sal-004", "Atún en aceite Calvo pack 3",     "fish"),
+    ("seed-sal-005", "Sardinas en aceite Hacendado",    "fish"),
+    ("seed-sal-006", "Tomate triturado Hacendado 400g", "sauce"),
+    # Carne y embutidos
+    ("seed-car-001", "Jamón serrano lonchas Campofrío", "meat"),
+    ("seed-car-002", "Pechuga de pavo Campofrío",       "meat"),
+    ("seed-car-003", "Chorizo extra El Pozo",           "meat"),
+    ("seed-car-004", "Salchichas Frankfurt Hacendado 4u","meat"),
+    ("seed-car-005", "Huevos camperos Hacendado 12u",   "eggs"),
+    # Congelados
+    ("seed-con-001", "Pizza margarita Hacendado",       "frozen"),
+    ("seed-con-002", "Pizza 4 quesos Dr. Oetker",       "frozen"),
+    ("seed-con-003", "Guisantes congelados Hacendado 1kg","frozen"),
+    ("seed-con-004", "Patatas fritas congeladas Hacendado","frozen"),
+    ("seed-con-005", "Helado Magnum classic",           "frozen"),
+    ("seed-con-006", "Helado Häagen-Dazs vainilla",     "frozen"),
+    # Higiene personal
+    ("seed-hig-001", "Champú Pantene Pro-V",            "hygiene"),
+    ("seed-hig-002", "Gel de ducha Sanex zero",         "hygiene"),
+    ("seed-hig-003", "Desodorante Dove spray",          "hygiene"),
+    ("seed-hig-004", "Pasta de dientes Colgate triple", "hygiene"),
+    ("seed-hig-005", "Jabón de manos Sanex",            "hygiene"),
+    ("seed-hig-006", "Papel higiénico Scottex 12u",     "hygiene"),
+    ("seed-hig-007", "Papel higiénico Hacendado 12u",   "hygiene"),
+    ("seed-hig-008", "Toallitas húmedas Hacendado 72u", "hygiene"),
+    # Bebé
+    ("seed-bab-001", "Pañales Dodot talla 3 56u",       "baby"),
+    ("seed-bab-002", "Pañales Dodot talla 4 46u",       "baby"),
+    ("seed-bab-003", "Pañales Dodot talla 5 38u",       "baby"),
+    ("seed-bab-004", "Pañales Huggies talla 4",         "baby"),
+    ("seed-bab-005", "Pañales Hacendado talla 4 40u",   "baby"),
+    ("seed-bab-006", "Toallitas Dodot sensitive 54u",   "baby"),
+    ("seed-bab-007", "Leche de inicio Nestlé NAN 1",    "baby"),
+    ("seed-bab-008", "Potito Nestlé pollo con arroz",   "baby"),
+    # Limpieza del hogar
+    ("seed-lim-001", "Detergente Ariel polvo 40 lavados","cleaning"),
+    ("seed-lim-002", "Detergente Persil líquido 30 lavados","cleaning"),
+    ("seed-lim-003", "Suavizante Mimosín azul 60 lavados","cleaning"),
+    ("seed-lim-004", "Limpiahogar Hacendado multiusos", "cleaning"),
+    ("seed-lim-005", "Lejía Estrella KH-7",             "cleaning"),
+    ("seed-lim-006", "Bayetas Scotch-Brite pack 2",     "cleaning"),
+]
+
+def init_db():
+    """Crea las tablas y carga el catálogo semilla si la BBDD está vacía."""
+    if not DATABASE_URL:
+        print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria")
+        return
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+
+        # Tabla de productos globales
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                barcode     TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                category    TEXT,
+                allowed     BOOLEAN DEFAULT TRUE,
+                source      TEXT DEFAULT 'manual',
+                created_at  TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        # Tabla de disponibilidad por supermercado
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS supermarket_products (
+                id              SERIAL PRIMARY KEY,
+                supermarket     TEXT NOT NULL,
+                barcode         TEXT NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
+                price_ref       REAL,
+                available       BOOLEAN DEFAULT TRUE,
+                UNIQUE(supermarket, barcode)
+            )
+        """)
+
+        # Carga semilla solo si la tabla está vacía
+        cur.execute("SELECT COUNT(*) FROM products")
+        count = cur.fetchone()[0]
+        if count == 0:
+            print(f"[DB] Cargando {len(SEED_CATALOG)} productos semilla...")
+            psycopg2.extras.execute_values(
+                cur,
+                "INSERT INTO products (barcode, name, category, source) VALUES %s ON CONFLICT DO NOTHING",
+                [(b, n, c, "local") for b, n, c in SEED_CATALOG]
+            )
+            print("[DB] Catálogo semilla cargado.")
+        else:
+            print(f"[DB] BBDD ya tiene {count} productos.")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error inicializando BBDD: {e}")
+
+# Arrancar init al levantar la app
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+# ── Helpers DB ─────────────────────────────────────────────────────────────────
+def db_search(q: str, supermarket: str = None) -> list:
+    """Busca productos en PostgreSQL. Filtra por supermercado si se indica."""
+    if not DATABASE_URL:
+        return []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if supermarket:
+            cur.execute("""
+                SELECT p.barcode, p.name, p.category, p.allowed, sp.price_ref
+                FROM products p
+                JOIN supermarket_products sp ON p.barcode = sp.barcode
+                WHERE sp.supermarket = %s
+                  AND p.allowed = TRUE
+                  AND unaccent(lower(p.name)) ILIKE unaccent(lower(%s))
+                ORDER BY p.name
+                LIMIT 12
+            """, (supermarket, f"%{q}%"))
+        else:
+            cur.execute("""
+                SELECT barcode, name, category, allowed, NULL as price_ref
+                FROM products
+                WHERE allowed = TRUE
+                  AND lower(name) ILIKE lower(%s)
+                ORDER BY name
+                LIMIT 12
+            """, (f"%{q}%",))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[DB] Search error: {e}")
+        return []
+
+def db_get_by_barcode(barcode: str) -> dict | None:
+    """Busca un producto por código de barras en DB."""
+    if not DATABASE_URL:
+        return None
+    try:
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM products WHERE barcode = %s", (barcode,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[DB] Barcode lookup error: {e}")
+        return None
+
+def db_upsert_product(barcode: str, name: str, category: str, allowed: bool, source: str = "off"):
+    """Guarda o actualiza un producto en DB (aprende de cada escaneo)."""
+    if not DATABASE_URL:
+        return
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO products (barcode, name, category, allowed, source)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (barcode) DO UPDATE
+              SET name = EXCLUDED.name,
+                  category = EXCLUDED.category,
+                  allowed = EXCLUDED.allowed
+        """, (barcode, name, category, allowed, source))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Upsert error: {e}")
+
+def db_all_products(supermarket: str = None) -> list:
+    """Lista todos los productos (con filtro opcional por supermercado)."""
+    if not DATABASE_URL:
+        return []
+    try:
+        conn = get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if supermarket:
+            cur.execute("""
+                SELECT p.barcode, p.name, p.category, p.allowed, p.source,
+                       sp.price_ref, sp.available
+                FROM products p
+                LEFT JOIN supermarket_products sp
+                       ON p.barcode = sp.barcode AND sp.supermarket = %s
+                ORDER BY p.category, p.name
+            """, (supermarket,))
+        else:
+            cur.execute("""
+                SELECT barcode, name, category, allowed, source,
+                       NULL as price_ref, NULL as available
+                FROM products ORDER BY category, name
+            """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"[DB] List error: {e}")
+        return []
+
+# ── Fallback en memoria (si no hay DB) ────────────────────────────────────────
+MEM_CATALOG = [(b, n, c) for b, n, c in SEED_CATALOG]
+
+def mem_search(q: str) -> list:
+    nq = normalize(q)
+    return [{"barcode": b, "name": n, "category": c, "allowed": True}
+            for b, n, c in MEM_CATALOG if nq in normalize(n)]
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -36,189 +330,138 @@ async def read_root():
 
 @app.post("/scan-product")
 async def scan_product(barcode: str = Form(...)):
-    """Simulates scanning a product with Open Food Facts"""
+    """Busca producto en DB → caché en memoria → OFF. Guarda lo que aprende."""
+    # 1. Buscar en DB
+    product = db_get_by_barcode(barcode)
+    if product:
+        return {"name": product["name"], "allowed": product["allowed"]}
+
+    # 2. Consultar OFF
     info = matcher.get_product_info(barcode)
+
+    # 3. Guardar en DB para futuros escaneos
+    if "Error" not in info.get("name", "Error") and "desconocido" not in info.get("name", ""):
+        db_upsert_product(
+            barcode=barcode,
+            name=info["name"],
+            category="unknown",
+            allowed=info["allowed"],
+            source="off"
+        )
     return info
 
 @app.post("/scan/manual")
 async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
-    """Logs a manually searched product added to the cart."""
+    """Registra un producto añadido manualmente al carrito."""
     return {"status": "success", "name": product_name, "price": price}
 
-# Catálogo local — fuente principal de búsqueda (instantáneo, sin depender de OFF)
-LOCAL_CATALOG = [
-    # Lácteos
-    {"name": "Leche entera Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
-    {"name": "Leche semidesnatada Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
-    {"name": "Leche desnatada Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
-    {"name": "Leche sin lactosa Hacendado", "categories_tags": ["en:dairy", "en:milk"]},
-    {"name": "Yogur natural Danone", "categories_tags": ["en:dairy", "en:yogurts"]},
-    {"name": "Yogur griego Fage 0%", "categories_tags": ["en:dairy", "en:yogurts"]},
-    {"name": "Mantequilla President", "categories_tags": ["en:dairy"]},
-    {"name": "Queso manchego El Ventero", "categories_tags": ["en:dairy", "en:cheese"]},
-    {"name": "Queso fresco Hacendado", "categories_tags": ["en:dairy", "en:cheese"]},
-    {"name": "Nata para cocinar Hacendado", "categories_tags": ["en:dairy"]},
-    # Bebidas
-    {"name": "Coca-Cola original 1.5L", "categories_tags": ["en:beverages", "en:soda"]},
-    {"name": "Coca-Cola Zero azúcar 1.5L", "categories_tags": ["en:beverages", "en:soda"]},
-    {"name": "Agua mineral Bezoya 1.5L", "categories_tags": ["en:beverages", "en:water"]},
-    {"name": "Agua mineral Hacendado 6x1.5L", "categories_tags": ["en:beverages", "en:water"]},
-    {"name": "Zumo de naranja Don Simón 1L", "categories_tags": ["en:beverages", "en:juice"]},
-    {"name": "Cerveza Estrella Damm lata", "categories_tags": ["en:alcoholic-beverages", "en:beer"]},
-    {"name": "Vino tinto Marqués de Cáceres", "categories_tags": ["en:alcoholic-beverages", "en:wine"]},
-    # Aceites y condimentos
-    {"name": "Aceite de oliva virgen extra Carbonell", "categories_tags": ["en:oils", "en:olive-oil"]},
-    {"name": "Aceite de girasol Hacendado", "categories_tags": ["en:oils"]},
-    {"name": "Vinagre de Jerez Hacendado", "categories_tags": ["en:condiments"]},
-    {"name": "Sal marina Hacendado 1kg", "categories_tags": ["en:condiments"]},
-    {"name": "Azúcar blanco Hacendado 1kg", "categories_tags": ["en:sweeteners"]},
-    {"name": "Azúcar moreno Hacendado 1kg", "categories_tags": ["en:sweeteners"]},
-    # Pasta, arroz y cereales
-    {"name": "Arroz redondo Hacendado 1kg", "categories_tags": ["en:grains", "en:rice"]},
-    {"name": "Pasta espagueti Barilla nº5", "categories_tags": ["en:pasta"]},
-    {"name": "Pasta macarrones Gallo", "categories_tags": ["en:pasta"]},
-    {"name": "Pasta fusilli Hacendado", "categories_tags": ["en:pasta"]},
-    {"name": "Harina de trigo Gallo 1kg", "categories_tags": ["en:bread", "en:flour"]},
-    {"name": "Cereales Corn Flakes Kellogg's", "categories_tags": ["en:bread", "en:cereals"]},
-    {"name": "Avena Quaker Oats 500g", "categories_tags": ["en:bread", "en:cereals"]},
-    # Pan y bollería
-    {"name": "Pan de molde Bimbo blanco", "categories_tags": ["en:bread", "en:bakery"]},
-    {"name": "Pan de molde integral Bimbo", "categories_tags": ["en:bread", "en:bakery"]},
-    {"name": "Croissants Hacendado pack 4", "categories_tags": ["en:bread", "en:bakery"]},
-    # Galletas y snacks
-    {"name": "Galletas María Fontaneda 800g", "categories_tags": ["en:snack", "en:biscuits"]},
-    {"name": "Galletas Oreo pack", "categories_tags": ["en:snack", "en:biscuits", "en:chocolate"]},
-    {"name": "Galletas digestive McVitie's", "categories_tags": ["en:snack", "en:biscuits"]},
-    {"name": "Patatas fritas Lay's clásicas", "categories_tags": ["en:snack", "en:chip", "en:crisps"]},
-    {"name": "Patatas fritas Ruffles queso", "categories_tags": ["en:snack", "en:chip"]},
-    {"name": "Nachos Hacendado con sal", "categories_tags": ["en:snack", "en:chip"]},
-    {"name": "Cacahuetes Hacendado tostados", "categories_tags": ["en:snack", "en:nuts"]},
-    # Chocolate y dulces
-    {"name": "Nutella 400g", "categories_tags": ["en:chocolate", "en:spreads"]},
-    {"name": "ColaCao original 400g", "categories_tags": ["en:beverages", "en:cocoa"]},
-    {"name": "Nesquik chocolate 400g", "categories_tags": ["en:beverages", "en:cocoa"]},
-    {"name": "Chocolate negro Lindt 85%", "categories_tags": ["en:chocolate", "en:candy"]},
-    {"name": "Ferrero Rocher 16u", "categories_tags": ["en:chocolate", "en:candy"]},
-    {"name": "Kit Kat Nestlé 2u", "categories_tags": ["en:chocolate", "en:candy"]},
-    {"name": "Kinder Bueno 2u", "categories_tags": ["en:chocolate", "en:candy"]},
-    # Café e infusiones
-    {"name": "Café molido Marcilla natural", "categories_tags": ["en:coffee", "en:beverages"]},
-    {"name": "Café Nescafé Classic", "categories_tags": ["en:coffee", "en:beverages"]},
-    {"name": "Té verde Hacendado", "categories_tags": ["en:coffee", "en:beverages"]},
-    # Salsas y conservas
-    {"name": "Tomate frito Hacendado 400g", "categories_tags": ["en:sauce", "en:condiment"]},
-    {"name": "Ketchup Heinz 460g", "categories_tags": ["en:sauce", "en:condiment", "en:ketchup"]},
-    {"name": "Mayonesa Hellmann's 430ml", "categories_tags": ["en:sauce", "en:condiment", "en:mayo"]},
-    {"name": "Atún en aceite Calvo pack 3", "categories_tags": ["en:meat", "en:fish"]},
-    {"name": "Sardinas en aceite Hacendado", "categories_tags": ["en:meat", "en:fish"]},
-    {"name": "Tomate triturado Hacendado 400g", "categories_tags": ["en:sauce"]},
-    # Carne y embutidos
-    {"name": "Jamón serrano lonchas Campofrío", "categories_tags": ["en:meat"]},
-    {"name": "Pechuga de pavo Campofrío", "categories_tags": ["en:meat", "en:poultry"]},
-    {"name": "Chorizo extra El Pozo", "categories_tags": ["en:meat"]},
-    {"name": "Salchichas Frankfurt Hacendado 4u", "categories_tags": ["en:meat"]},
-    {"name": "Huevos camperos Hacendado 12u", "categories_tags": ["en:egg"]},
-    # Congelados
-    {"name": "Pizza margarita Hacendado", "categories_tags": ["en:frozen"]},
-    {"name": "Pizza 4 quesos Dr. Oetker", "categories_tags": ["en:frozen"]},
-    {"name": "Guisantes congelados Hacendado 1kg", "categories_tags": ["en:frozen", "en:vegetables"]},
-    {"name": "Patatas fritas congeladas Hacendado", "categories_tags": ["en:frozen"]},
-    {"name": "Helado Magnum classic", "categories_tags": ["en:frozen", "en:dessert"]},
-    {"name": "Helado Häagen-Dazs vainilla", "categories_tags": ["en:frozen", "en:dessert"]},
-    # Higiene personal
-    {"name": "Champú Pantene Pro-V", "categories_tags": ["en:hygiene"]},
-    {"name": "Gel de ducha Sanex zero", "categories_tags": ["en:hygiene"]},
-    {"name": "Desodorante Dove spray", "categories_tags": ["en:hygiene"]},
-    {"name": "Pasta de dientes Colgate triple", "categories_tags": ["en:hygiene"]},
-    {"name": "Jabón de manos Sanex", "categories_tags": ["en:hygiene"]},
-    {"name": "Papel higiénico Scottex 12u", "categories_tags": ["en:hygiene"]},
-    {"name": "Papel higiénico Hacendado 12u", "categories_tags": ["en:hygiene"]},
-    {"name": "Toallitas húmedas Hacendado 72u", "categories_tags": ["en:hygiene"]},
-    # Bebé
-    {"name": "Pañales Dodot talla 4 46u", "categories_tags": ["en:hygiene", "en:baby"]},
-    {"name": "Pañales Dodot talla 3 56u", "categories_tags": ["en:hygiene", "en:baby"]},
-    {"name": "Pañales Huggies talla 4", "categories_tags": ["en:hygiene", "en:baby"]},
-    {"name": "Pañales Hacendado talla 4 40u", "categories_tags": ["en:hygiene", "en:baby"]},
-    {"name": "Toallitas Dodot sensitive 54u", "categories_tags": ["en:hygiene", "en:baby"]},
-    {"name": "Leche de inicio Nestlé NAN 1", "categories_tags": ["en:dairy", "en:baby"]},
-    {"name": "Potito Nestlé pollo con arroz", "categories_tags": ["en:baby"]},
-    # Limpieza del hogar
-    {"name": "Detergente Ariel polvo 40 lavados", "categories_tags": ["en:hygiene"]},
-    {"name": "Detergente Persil líquido 30 lavados", "categories_tags": ["en:hygiene"]},
-    {"name": "Suavizante Mimosín azul 60 lavados", "categories_tags": ["en:hygiene"]},
-    {"name": "Limpiahogar Hacendado multiusos", "categories_tags": ["en:hygiene"]},
-    {"name": "Lejía Estrella KH-7", "categories_tags": ["en:hygiene"]},
-    {"name": "Bayetas Scotch-Brite pack 2", "categories_tags": ["en:hygiene"]},
-]
-
-def search_local_catalog(query: str):
-    """Búsqueda local por substring, insensible a mayúsculas y acentos."""
-    import unicodedata
-    def normalize(s):
-        return unicodedata.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode()
-    q = normalize(query.strip())
-    return [p for p in LOCAL_CATALOG if q in normalize(p["name"])]
-
 @app.get("/api/search")
-async def search_products(q: str):
-    """Busca en catálogo local (instantáneo) y enriquece con OFF si responde rápido."""
+async def search_products(q: str, supermarket: str = Query(default=None)):
+    """Búsqueda en DB (instantánea). Enriquece con OFF si responde en <2s."""
     if not q or len(q.strip()) < 2:
         return {"products": []}
 
-    # Siempre buscamos en local primero (instantáneo)
-    local_results = search_local_catalog(q)
+    # 1. Buscar en DB (o en memoria si no hay DB)
+    if DATABASE_URL:
+        db_results = db_search(q, supermarket)
+    else:
+        db_results = mem_search(q)
 
-    # Intentamos OFF con timeout corto para enriquecer resultados
+    # 2. Intentar enriquecer con OFF (timeout corto)
     try:
-        headers = {"User-Agent": "SocialPayMVP - Android - Version 1.0 - www.jepco.es"}
-        params = {
-            "search_terms": q.strip(),
-            "search_simple": "1",
-            "action": "process",
-            "json": "1",
-            "page_size": "6",
-        }
-        response = requests.get(
+        resp = requests.get(
             "https://world.openfoodfacts.org/cgi/search.pl",
-            params=params,
-            headers=headers,
-            timeout=2  # Timeout muy corto: si tarda más, usamos solo local
+            params={"search_terms": q, "search_simple": "1",
+                    "action": "process", "json": "1", "page_size": "5"},
+            headers={"User-Agent": "SocialPayMVP/1.0"},
+            timeout=2
         )
-        if response.status_code == 200:
-            data = response.json()
-            off_results = []
-            local_names = {p["name"].lower() for p in local_results}
-            for p in data.get("products", []):
+        if resp.status_code == 200:
+            existing_names = {normalize(r["name"]) for r in db_results}
+            for p in resp.json().get("products", []):
                 name = (p.get("product_name_es") or p.get("product_name") or "").strip()
-                if name and name.lower() not in local_names:
-                    off_results.append({"name": name, "categories_tags": p.get("categories_tags", [])})
-            # Locales primero, luego los de OFF que no sean duplicados
-            return {"products": local_results + off_results, "source": "combined"}
+                if name and normalize(name) not in existing_names:
+                    db_results.append({"name": name, "category": "unknown", "allowed": True})
+                    existing_names.add(normalize(name))
     except Exception:
-        pass  # Timeout o error: solo devolvemos locales
+        pass
 
-    return {"products": local_results, "source": "local"}
+    return {"products": db_results, "source": "db" if DATABASE_URL else "memory"}
+
+# ── Admin: Catálogo de Productos ───────────────────────────────────────────────
+
+@app.get("/api/admin/products")
+async def list_products(supermarket: str = Query(default=None)):
+    """Lista todos los productos, opcionalmente filtrados por supermercado."""
+    return {"products": db_all_products(supermarket)}
+
+@app.post("/api/admin/products")
+async def add_product(
+    barcode: str = Form(...),
+    name: str = Form(...),
+    category: str = Form(default="unknown"),
+    allowed: bool = Form(default=True),
+    supermarket: str = Form(default=None),
+    price_ref: float = Form(default=None)
+):
+    """Añade o actualiza un producto en el catálogo."""
+    db_upsert_product(barcode, name, category, allowed, source="manual")
+
+    # Si se especifica supermercado, asociarlo también
+    if supermarket and DATABASE_URL:
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO supermarket_products (supermarket, barcode, price_ref)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (supermarket, barcode)
+                DO UPDATE SET price_ref = EXCLUDED.price_ref, available = TRUE
+            """, (supermarket, barcode, price_ref))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"status": "ok", "barcode": barcode, "name": name}
+
+@app.delete("/api/admin/products/{barcode}")
+async def delete_product(barcode: str):
+    """Elimina un producto del catálogo."""
+    if not DATABASE_URL:
+        return {"status": "no_db"}
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM products WHERE barcode = %s", (barcode,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"status": "deleted"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# ── Ticket upload & Auditoría ──────────────────────────────────────────────────
 
 @app.post("/upload-ticket")
 async def upload_ticket(
-    ticket: UploadFile = File(...), 
-    cart_total: float = Form(...), 
+    ticket: UploadFile = File(...),
+    cart_total: float = Form(...),
     cart_items: str = Form(...),
     supermarket: str = Form(...)
 ):
-    """Handles ticket upload, simulated OCR, and matching."""
     file_path = UPLOAD_DIR / ticket.filename
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(ticket.file, buffer)
-    
-    # Simulate OCR extracting text from image
-    # For MVP, we'll pretend the OCR extracted text that contains the cart_total
-    simulated_ocr_text = f"Supermercado Ejemplo\nPan: 1.00\nLeche: 1.20\nTOTAL: {cart_total:.2f}\nGracias por su compra"
-    
+
+    simulated_ocr_text = (
+        f"Supermercado Ejemplo\nPan: 1.00\nLeche: 1.20\n"
+        f"TOTAL: {cart_total:.2f}\nGracias por su compra"
+    )
     match_result = matcher.match_ticket_vs_cart(cart_total, simulated_ocr_text)
-    
+
     if match_result:
-        # Generar registro inmutable de auditoría para FSE+
         try:
             parsed_cart_items = json.loads(cart_items)
         except json.JSONDecodeError:
@@ -234,18 +477,15 @@ async def upload_ticket(
             "status": "AUDITED_AND_APPROVED"
         }
         db_auditoria.append(audit_record)
-
         return {"status": "success", "message": "Ticket validado correctamente"}
     else:
         return {"status": "error", "message": "El total no coincide con el ticket"}
 
 @app.get("/api/admin/audit-logs")
 async def get_audit_logs():
-    """Panel de control simulado para inspectores de la UE."""
     return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard():
-    """Vista HTML del panel de control de auditoría FSE+."""
     html_path = BASE_DIR / "templates" / "dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))

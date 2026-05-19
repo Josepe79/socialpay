@@ -101,13 +101,17 @@
 <body>
 
     <div class="header">
-        <h1>Control de Auditoría FSE+</h1>
-        <div style="font-size: 0.9rem; color: var(--text-muted);">
-            Powered by <strong>Up Spain</strong>
-        </div>
+        <h1>Panel de Control FSE+</h1>
+        <div style="font-size: 0.9rem; color: var(--text-muted);">Powered by <strong>Up Spain</strong></div>
     </div>
 
-    <div class="container">
+    <!-- Tabs -->
+    <div style="background: white; border-bottom: 1px solid var(--border); padding: 0 40px; display: flex; gap: 4px;">
+        <button id="tab-audit" onclick="showTab('audit')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--primary); border-bottom: 3px solid var(--primary); cursor: pointer;">📋 Auditoría</button>
+        <button id="tab-catalog" onclick="showTab('catalog')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">🛒 Catálogo de Productos</button>
+    </div>
+
+    <div class="container" id="panel-audit">
         <div class="card">
             <table>
                 <thead>
@@ -127,51 +131,211 @@
         </div>
     </div>
 
+    <!-- Catálogo de Productos -->
+    <div class="container" id="panel-catalog" style="display:none;">
+        <div class="card" style="padding: 24px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 1.2rem;">🛒 Catálogo de Productos</h2>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <select id="filter-super" onchange="loadProducts()" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 0.9rem;">
+                        <option value="">Todos los supermercados</option>
+                        <option value="mercadona">Mercadona</option>
+                        <option value="carrefour">Carrefour</option>
+                        <option value="ametller">Ametller Origen</option>
+                        <option value="dia">Dia</option>
+                    </select>
+                    <input id="catalog-search" type="text" placeholder="Buscar producto..." oninput="filterTable()" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 0.9rem; width: 200px;">
+                    <button onclick="showAddModal()" style="padding: 8px 18px; background: var(--primary); color: white; border: none; border-radius: 8px; font-family: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;">+ Añadir producto</button>
+                </div>
+            </div>
+            <p id="catalog-count" style="margin: 0 0 16px 0; color: var(--text-muted); font-size: 0.85rem;"></p>
+            <div style="overflow-x: auto;">
+                <table id="catalog-table">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Nombre</th>
+                            <th>Categoría</th>
+                            <th>Permitido</th>
+                            <th>Fuente</th>
+                            <th>Precio ref.</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="catalog-body">
+                        <tr><td colspan="7" class="empty-state">Cargando catálogo...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Añadir Producto -->
+    <div id="add-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:white; border-radius:12px; padding:28px; width:90%; max-width:480px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin:0 0 20px 0;">Añadir / Editar Producto</h3>
+            <form id="add-form" onsubmit="submitProduct(event)" style="display:flex; flex-direction:column; gap:12px;">
+                <label style="font-size:0.85rem; font-weight:600;">Código de barras *
+                    <input id="f-barcode" name="barcode" required placeholder="Ej: 8410128001234" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                </label>
+                <label style="font-size:0.85rem; font-weight:600;">Nombre *
+                    <input id="f-name" name="name" required placeholder="Ej: Leche entera Hacendado" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                </label>
+                <div style="display:flex; gap:10px;">
+                    <label style="font-size:0.85rem; font-weight:600; flex:1;">Categoría
+                        <select id="f-category" name="category" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.9rem;">
+                            <option value="dairy">Lácteos</option>
+                            <option value="beverages">Bebidas</option>
+                            <option value="baby">Bebé</option>
+                            <option value="meat">Carne/Embutidos</option>
+                            <option value="fish">Pescado</option>
+                            <option value="frozen">Congelados</option>
+                            <option value="bakery">Pan/Bollería</option>
+                            <option value="snack">Snacks</option>
+                            <option value="chocolate">Chocolate</option>
+                            <option value="sauce">Salsas</option>
+                            <option value="hygiene">Higiene</option>
+                            <option value="cleaning">Limpieza</option>
+                            <option value="unknown">Otro</option>
+                        </select>
+                    </label>
+                    <label style="font-size:0.85rem; font-weight:600; flex:1;">Permitido
+                        <select id="f-allowed" name="allowed" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.9rem;">
+                            <option value="true">✅ Sí</option>
+                            <option value="false">🚫 No (bloqueado)</option>
+                        </select>
+                    </label>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <label style="font-size:0.85rem; font-weight:600; flex:1;">Supermercado (opcional)
+                        <select id="f-super" name="supermarket" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.9rem;">
+                            <option value="">Global (todos)</option>
+                            <option value="mercadona">Mercadona</option>
+                            <option value="carrefour">Carrefour</option>
+                            <option value="ametller">Ametller Origen</option>
+                            <option value="dia">Dia</option>
+                        </select>
+                    </label>
+                    <label style="font-size:0.85rem; font-weight:600; flex:1;">Precio referencia (€)
+                        <input id="f-price" name="price_ref" type="number" step="0.01" placeholder="0.00" style="width:100%; margin-top:4px; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                    </label>
+                </div>
+                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:8px;">
+                    <button type="button" onclick="closeAddModal()" style="padding:10px 20px; border:1px solid var(--border); background:white; border-radius:8px; font-family:inherit; cursor:pointer;">Cancelar</button>
+                    <button type="submit" style="padding:10px 24px; background:var(--primary); color:white; border:none; border-radius:8px; font-family:inherit; font-weight:600; cursor:pointer;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
+        // ── Tab switching ─────────────────────────────────────────────────────
+        function showTab(tab) {
+            document.getElementById('panel-audit').style.display   = tab === 'audit'   ? 'block' : 'none';
+            document.getElementById('panel-catalog').style.display = tab === 'catalog' ? 'block' : 'none';
+            document.getElementById('tab-audit').style.cssText   = tab === 'audit'   ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
+            document.getElementById('tab-catalog').style.cssText = tab === 'catalog' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
+            if (tab === 'catalog') loadProducts();
+        }
+
+        // ── Auditoría ─────────────────────────────────────────────────────────
         async function fetchLogs() {
             try {
                 const response = await fetch('/api/admin/audit-logs');
                 const data = await response.json();
-                
                 const tbody = document.getElementById('logs-body');
-                
                 if (data.logs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay transacciones registradas aún. Prueba a hacer una compra en el móvil.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay transacciones registradas aún.</td></tr>';
                     return;
                 }
-
                 tbody.innerHTML = '';
-                
                 data.logs.forEach(log => {
                     const date = new Date(log.timestamp).toLocaleString('es-ES');
-                    
                     let cartHtml = '<ul class="cart-list">';
-                    log.cart_snapshot.forEach(item => {
-                        cartHtml += `<li>${item.name} - €${item.price.toFixed(2)}</li>`;
-                    });
+                    log.cart_snapshot.forEach(item => { cartHtml += `<li>${item.name} - €${item.price.toFixed(2)}</li>`; });
                     cartHtml += '</ul>';
-
-                    // Formatear nombre del supermercado
                     const superName = log.supermarket ? log.supermarket.charAt(0).toUpperCase() + log.supermarket.slice(1) : 'No definido';
-
-                    const row = `
-                        <tr>
-                            <td><span class="transaction-id">${log.transaction_id}</span></td>
-                            <td>${date}</td>
-                            <td><strong>${superName}</strong></td>
-                            <td>${log.user_id}</td>
-                            <td>${cartHtml}</td>
-                            <td><span class="status-badge">${log.status}</span></td>
-                        </tr>
-                    `;
-                    tbody.innerHTML += row;
+                    tbody.innerHTML += `<tr>
+                        <td><span class="transaction-id">${log.transaction_id}</span></td>
+                        <td>${date}</td>
+                        <td><strong>${superName}</strong></td>
+                        <td>${log.user_id}</td>
+                        <td>${cartHtml}</td>
+                        <td><span class="status-badge">${log.status}</span></td>
+                    </tr>`;
                 });
-            } catch (error) {
-                console.error("Error cargando auditoría", error);
-            }
+            } catch (error) { console.error('Error cargando auditoría', error); }
         }
 
-        // Cargar al inicio
+        // ── Catálogo ──────────────────────────────────────────────────────────
+        const CATEGORY_LABELS = {
+            dairy:'Lácteos', beverages:'Bebidas', baby:'Bebé', meat:'Carne',
+            fish:'Pescado', frozen:'Congelados', bakery:'Pan', snack:'Snacks',
+            chocolate:'Chocolate', sauce:'Salsas', hygiene:'Higiene',
+            cleaning:'Limpieza', coffee:'Café', tea:'Té', cocoa:'Cacao',
+            eggs:'Huevos', oils:'Aceites', pasta:'Pasta', grains:'Cereales',
+            condiments:'Condimentos', sweeteners:'Endulzantes', unknown:'Otro'
+        };
+
+        let allProducts = [];
+
+        async function loadProducts() {
+            const super_ = document.getElementById('filter-super').value;
+            const url = '/api/admin/products' + (super_ ? `?supermarket=${super_}` : '');
+            const data = await (await fetch(url)).json();
+            allProducts = data.products || [];
+            document.getElementById('catalog-count').textContent = `${allProducts.length} productos en el catálogo`;
+            renderProducts(allProducts);
+        }
+
+        function renderProducts(products) {
+            const tbody = document.getElementById('catalog-body');
+            if (products.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No hay productos. Añade el primero.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = products.map(p => {
+                const cat = CATEGORY_LABELS[p.category] || p.category || '—';
+                const allowed = p.allowed ? '✅' : '🚫';
+                const source = {off:'OFF', local:'Local', manual:'Manual'}[p.source] || p.source || '—';
+                const price = p.price_ref != null ? `€${parseFloat(p.price_ref).toFixed(2)}` : '—';
+                return `<tr>
+                    <td style="font-family:monospace;font-size:0.8rem;color:var(--text-muted)">${p.barcode}</td>
+                    <td style="font-weight:500">${p.name}</td>
+                    <td><span style="background:#F3F4F6;padding:2px 8px;border-radius:4px;font-size:0.8rem">${cat}</span></td>
+                    <td style="text-align:center">${allowed}</td>
+                    <td style="font-size:0.8rem;color:var(--text-muted)">${source}</td>
+                    <td>${price}</td>
+                    <td><button onclick="deleteProduct('${p.barcode}')" style="background:#FEE2E2;color:#DC2626;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.8rem;">Eliminar</button></td>
+                </tr>`;
+            }).join('');
+        }
+
+        function filterTable() {
+            const q = document.getElementById('catalog-search').value.toLowerCase();
+            renderProducts(allProducts.filter(p => p.name.toLowerCase().includes(q) || (p.barcode||'').includes(q)));
+        }
+
+        async function deleteProduct(barcode) {
+            if (!confirm('¿Eliminar este producto del catálogo?')) return;
+            await fetch(`/api/admin/products/${barcode}`, { method: 'DELETE' });
+            loadProducts();
+        }
+
+        function showAddModal() { document.getElementById('add-modal').style.display = 'flex'; }
+        function closeAddModal() { document.getElementById('add-modal').style.display = 'none'; document.getElementById('add-form').reset(); }
+
+        async function submitProduct(e) {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            fd.set('allowed', document.getElementById('f-allowed').value === 'true');
+            const r = await fetch('/api/admin/products', { method: 'POST', body: fd });
+            const data = await r.json();
+            if (data.status === 'ok') { closeAddModal(); loadProducts(); }
+            else alert('Error: ' + JSON.stringify(data));
+        }
+
+        // Init
         fetchLogs();
     </script>
 </body>
