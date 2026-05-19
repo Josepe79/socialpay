@@ -458,7 +458,6 @@ def ocr_ticket_via_gemini(image_path: Path) -> tuple[dict | None, str | None]:
         
     try:
         genai.configure(api_key=key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
         img = Image.open(image_path)
         
         prompt = (
@@ -471,8 +470,25 @@ def ocr_ticket_via_gemini(image_path: Path) -> tuple[dict | None, str | None]:
             '{"total": 0.0, "items": []}'
         )
         
-        print(f"[OCR] Sending image to Gemini: {image_path.name}")
-        response = model.generate_content([prompt, img])
+        # Try multiple active model versions to support deprecation states in 2026
+        model_names = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        response = None
+        last_error = None
+        
+        for name in model_names:
+            try:
+                print(f"[OCR] Attempting generation with model: {name}")
+                model = genai.GenerativeModel(name)
+                response = model.generate_content([prompt, img])
+                print(f"[OCR] Success with model: {name}")
+                break
+            except Exception as e:
+                last_error = e
+                print(f"[OCR] Model {name} failed: {e}")
+                
+        if response is None:
+            raise last_error or Exception("No generative models succeeded.")
+            
         text = response.text.strip()
         print(f"[OCR] Raw response from Gemini: {text}")
         
