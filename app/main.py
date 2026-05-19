@@ -447,16 +447,17 @@ async def delete_product(barcode: str):
 
 # ── Ticket upload & OCR Validation ──────────────────────────────────────────
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+def get_gemini_key():
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
 
-def ocr_ticket_via_gemini(image_path: Path) -> dict:
-    """Uses Gemini 1.5 Flash to extract items and total from ticket image."""
-    if not GEMINI_API_KEY:
-        print("[OCR] GEMINI_API_KEY not configured. Falling back to simulation.")
-        return None
+def ocr_ticket_via_gemini(image_path: Path) -> tuple[dict | None, str | None]:
+    """Uses Gemini 1.5 Flash to extract items and total. Returns (data, error_message)."""
+    key = get_gemini_key()
+    if not key:
+        return None, "No se detectó GEMINI_API_KEY ni GOOGLE_API_KEY en variables de entorno."
+        
     try:
+        genai.configure(api_key=key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         img = Image.open(image_path)
         
@@ -485,10 +486,11 @@ def ocr_ticket_via_gemini(image_path: Path) -> dict:
             text = "\n".join(lines).strip()
             
         data = json.loads(text)
-        return data
+        return data, None
     except Exception as e:
-        print(f"[OCR] Error calling Gemini: {e}")
-        return None
+        error_msg = str(e)
+        print(f"[OCR] Error calling Gemini: {error_msg}")
+        return None, error_msg
 
 @app.post("/upload-ticket")
 async def upload_ticket(
@@ -507,14 +509,13 @@ async def upload_ticket(
     except json.JSONDecodeError:
         parsed_cart_items = []
 
-    # 2. Try Gemini OCR, fallback to smart simulation if key is missing or calls fail
-    ticket_data = ocr_ticket_via_gemini(file_path)
+    # 2. Try Gemini OCR
+    ticket_data, debug_error = ocr_ticket_via_gemini(file_path)
     
     using_fallback = False
     if not ticket_data:
-        # Fallback inteligente para la demo si no hay API key o hay error de red/cuota
         using_fallback = True
-        print("[OCR] Using simulated fallback matching the cart exactly.")
+        print(f"[OCR] Falling back to simulation. Reason: {debug_error}")
         ticket_data = {
             "total": cart_total,
             "items": [{"name": item["name"], "price": item["price"]} for item in parsed_cart_items]
@@ -524,6 +525,7 @@ async def upload_ticket(
     validator = TicketValidator()
     report = validator.validate(parsed_cart_items, cart_total, ticket_data)
     report["using_fallback"] = using_fallback
+    report["debug_error"] = debug_error
 
     # 4. Save to FSE+ Audit Logs if validated successfully
     if report["status"] == "validated":

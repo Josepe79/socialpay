@@ -971,8 +971,9 @@
                 }
 
                 const fallbackBadge = report.using_fallback ? `
-                    <div style="margin-top: 10px; text-align: center; font-size: 0.75rem; color: var(--text-muted); background: #F3F4F6; padding: 4px; border-radius: 6px;">
-                        ⚡ Modo Demo (Simulación)
+                    <div style="margin-top: 10px; text-align: center; font-size: 0.75rem; color: #7F1D1D; background: #FEF2F2; padding: 6px 10px; border-radius: 8px; border: 1px solid #FCA5A5;">
+                        ⚡ Modo Demo (Simulación)<br>
+                        <span style="font-size: 0.7rem; opacity: 0.85;">Motivo: ${report.debug_error || 'Clave no configurada'}</span>
                     </div>
                 ` : '';
 
