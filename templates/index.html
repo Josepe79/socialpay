@@ -419,7 +419,10 @@
                     <div class="spinner" id="validate-spinner"></div>
                 </button>
             </div>
-            <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(event)">
+             <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(event)">
+             
+             <!-- Contenedor del informe de validación OCR -->
+             <div id="validation-report-container" style="display: none; margin-top: 15px; padding: 16px; border-radius: 14px; background: #F9FAFB; border: 1.5px solid var(--border); font-size: 0.88rem; box-shadow: inset 0 2px 4px rgba(0,0,0,0.015); box-sizing: border-box; width: 100%;"></div>
 
             <div class="step-block mt-auto">
                 <div class="step-header">
@@ -878,23 +881,17 @@
 
             const btnValidate = document.getElementById('btn-validate');
             const spinner = document.getElementById('validate-spinner');
+            const reportContainer = document.getElementById('validation-report-container');
             
             // UI Loading state
             btnValidate.disabled = true;
             spinner.style.display = 'block';
+            reportContainer.style.display = 'none';
+            reportContainer.innerHTML = '';
             
-            // Secuencia de animación de OCR simulada
-            const statuses = [
-                " Subiendo imagen... ",
-                " Extrayendo texto (OCR)... ",
-                " Comprobando importes... "
-            ];
-            
-            for (let i = 0; i < statuses.length; i++) {
-                btnValidate.childNodes[2].textContent = statuses[i];
-                // Esperamos 1.5 segundos en cada paso para darle más realismo a la demo
-                await new Promise(r => setTimeout(r, 1500)); 
-            }
+            btnValidate.childNodes[2].textContent = " Subiendo imagen... ";
+            await new Promise(r => setTimeout(r, 800));
+            btnValidate.childNodes[2].textContent = " Analizando con Gemini Vision... ";
 
             const formData = new FormData();
             formData.append('ticket', file);
@@ -908,17 +905,96 @@
                     body: formData
                 });
                 
-                const data = await response.json();
+                const report = await response.json();
                 
-                if (data.status === 'success') {
-                    showToast(data.message);
+                // Render beautiful validation report
+                let statusHeader = '';
+                let statusColor = '';
+                let statusBg = '';
+                
+                if (report.status === 'validated') {
+                    statusHeader = '✅ Validación Exitosa';
+                    statusColor = '#065F46';
+                    statusBg = '#D1FAE5';
                     document.getElementById('btn-pay').classList.add('active');
+                } else if (report.status === 'discrepancy') {
+                    statusHeader = '⚠️ Discrepancia Detectada';
+                    statusColor = '#92400E';
+                    statusBg = '#FEF3C7';
+                    document.getElementById('btn-pay').classList.remove('active');
                 } else {
-                    showToast(data.message || 'Error en la validación');
+                    statusHeader = '❌ Error de Lectura';
+                    statusColor = '#991B1B';
+                    statusBg = '#FEE2E2';
+                    document.getElementById('btn-pay').classList.remove('active');
                 }
+
+                let itemsHtml = '';
+                if (report.items && report.items.length > 0) {
+                    itemsHtml = '<div style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">';
+                    report.items.forEach(item => {
+                        let icon = '❓';
+                        let textColor = 'var(--text-main)';
+                        let note = '';
+                        
+                        if (item.match === 'ok') {
+                            icon = '✅';
+                            textColor = '#065F46';
+                        } else if (item.match === 'price_diff') {
+                            icon = '⚠️';
+                            textColor = '#92400E';
+                            note = ` (Ticket: €${parseFloat(item.ticket_price).toFixed(2)})`;
+                        } else if (item.match === 'not_found') {
+                            icon = '❌';
+                            textColor = '#991B1B';
+                            note = ' (No encontrado en ticket)';
+                        } else if (item.match === 'extra_in_ticket') {
+                            icon = '➕';
+                            textColor = 'var(--text-muted)';
+                            note = ' (Extra en ticket)';
+                        }
+                        
+                        const nameText = item.cart_name !== '---' ? item.cart_name : item.ticket_name;
+                        const priceText = item.cart_price != null ? `€${parseFloat(item.cart_price).toFixed(2)}` : `€${parseFloat(item.ticket_price).toFixed(2)}`;
+
+                        itemsHtml += `
+                            <div style="display: flex; justify-content: space-between; align-items: center; color: ${textColor}; font-size: 0.85rem;">
+                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; display: flex; gap: 6px; align-items: center;">
+                                    <span>${icon}</span>
+                                    <span>${nameText}</span>
+                                </span>
+                                <span style="font-weight: 500;">${priceText}${note}</span>
+                            </div>
+                        `;
+                    });
+                    itemsHtml += '</div>';
+                }
+
+                const fallbackBadge = report.using_fallback ? `
+                    <div style="margin-top: 10px; text-align: center; font-size: 0.75rem; color: var(--text-muted); background: #F3F4F6; padding: 4px; border-radius: 6px;">
+                        ⚡ Modo Demo (Simulación)
+                    </div>
+                ` : '';
+
+                reportContainer.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: ${statusBg}; color: ${statusColor}; padding: 8px 12px; border-radius: 8px; font-weight: 600;">
+                        <span>${statusHeader}</span>
+                        <span>${report.score.toFixed(0)}% Match</span>
+                    </div>
+                    <div style="margin-top: 10px; display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted);">
+                        <span>Total Carrito: <strong>€${report.cart_total.toFixed(2)}</strong></span>
+                        <span>Total Ticket: <strong style="color: ${report.total_ok ? '#065F46' : '#DC2626'}">€${report.ticket_total.toFixed(2)}</strong></span>
+                    </div>
+                    ${itemsHtml}
+                    ${fallbackBadge}
+                `;
+                
+                reportContainer.style.display = 'block';
+                showToast(report.status === 'validated' ? "Validación correcta" : "Discrepancia en el ticket");
+
             } catch (error) {
                 console.error("Error uploading ticket:", error);
-                showToast("Error de conexión");
+                showToast("Error en el servicio de validación");
             } finally {
                 // Restore UI
                 btnValidate.disabled = false;

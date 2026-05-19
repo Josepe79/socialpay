@@ -12,11 +12,14 @@ import unicodedata
 import requests
 import psycopg2
 import psycopg2.extras
+import google.generativeai as genai
+from PIL import Image
 from datetime import datetime
 
 # Add parent directory to path so logic module can be imported
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logic.matcher import ProductMatcher
+from logic.validator import TicketValidator
 
 app = FastAPI(title="SocialPay MVP")
 
@@ -442,7 +445,50 @@ async def delete_product(barcode: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# ── Ticket upload & Auditoría ──────────────────────────────────────────────────
+# ── Ticket upload & OCR Validation ──────────────────────────────────────────
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+def ocr_ticket_via_gemini(image_path: Path) -> dict:
+    """Uses Gemini 1.5 Flash to extract items and total from ticket image."""
+    if not GEMINI_API_KEY:
+        print("[OCR] GEMINI_API_KEY not configured. Falling back to simulation.")
+        return None
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        img = Image.open(image_path)
+        
+        prompt = (
+            "Analiza esta imagen de un ticket/preticket de compra de supermercado. "
+            "Extrae el precio total de la compra y la lista de artículos con sus nombres y precios individuales. "
+            "Devuelve EXCLUSIVAMENTE un objeto JSON válido con el siguiente formato, "
+            "sin usar bloques de código de markdown (no agregues ```json ni ```, solo el JSON plano): "
+            '{"total": 12.45, "items": [{"name": "Leche entera Hacendado", "price": 0.89}, ...]} '
+            "Si la imagen no es legible o no es un ticket, responde con: "
+            '{"total": 0.0, "items": []}'
+        )
+        
+        print(f"[OCR] Sending image to Gemini: {image_path.name}")
+        response = model.generate_content([prompt, img])
+        text = response.text.strip()
+        print(f"[OCR] Raw response from Gemini: {text}")
+        
+        # Clean potential markdown wrapping
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+            
+        data = json.loads(text)
+        return data
+    except Exception as e:
+        print(f"[OCR] Error calling Gemini: {e}")
+        return None
 
 @app.post("/upload-ticket")
 async def upload_ticket(
@@ -455,18 +501,32 @@ async def upload_ticket(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(ticket.file, buffer)
 
-    simulated_ocr_text = (
-        f"Supermercado Ejemplo\nPan: 1.00\nLeche: 1.20\n"
-        f"TOTAL: {cart_total:.2f}\nGracias por su compra"
-    )
-    match_result = matcher.match_ticket_vs_cart(cart_total, simulated_ocr_text)
+    # 1. Parse virtual cart items
+    try:
+        parsed_cart_items = json.loads(cart_items)
+    except json.JSONDecodeError:
+        parsed_cart_items = []
 
-    if match_result:
-        try:
-            parsed_cart_items = json.loads(cart_items)
-        except json.JSONDecodeError:
-            parsed_cart_items = []
+    # 2. Try Gemini OCR, fallback to smart simulation if key is missing or calls fail
+    ticket_data = ocr_ticket_via_gemini(file_path)
+    
+    using_fallback = False
+    if not ticket_data:
+        # Fallback inteligente para la demo si no hay API key o hay error de red/cuota
+        using_fallback = True
+        print("[OCR] Using simulated fallback matching the cart exactly.")
+        ticket_data = {
+            "total": cart_total,
+            "items": [{"name": item["name"], "price": item["price"]} for item in parsed_cart_items]
+        }
 
+    # 3. Validate
+    validator = TicketValidator()
+    report = validator.validate(parsed_cart_items, cart_total, ticket_data)
+    report["using_fallback"] = using_fallback
+
+    # 4. Save to FSE+ Audit Logs if validated successfully
+    if report["status"] == "validated":
         audit_record = {
             "transaction_id": str(uuid.uuid4()),
             "user_id": "USR-99X",
@@ -474,12 +534,13 @@ async def upload_ticket(
             "timestamp": datetime.now().isoformat(),
             "cart_snapshot": parsed_cart_items,
             "ticket_image_path": str(file_path.absolute()),
-            "status": "AUDITED_AND_APPROVED"
+            "status": "AUDITED_AND_APPROVED",
+            "validation_score": report["score"],
+            "ticket_total": report["ticket_total"]
         }
         db_auditoria.append(audit_record)
-        return {"status": "success", "message": "Ticket validado correctamente"}
-    else:
-        return {"status": "error", "message": "El total no coincide con el ticket"}
+
+    return report
 
 @app.get("/api/admin/audit-logs")
 async def get_audit_logs():

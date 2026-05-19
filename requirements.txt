@@ -5,3 +5,4 @@ pillow
 requests
 jinja2
 psycopg2-binary
+google-generativeai
