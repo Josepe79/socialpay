@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR, Boolean
 from sqlalchemy.types import TypeDecorator
 from app.database import Base
 
@@ -57,6 +57,13 @@ class Usuario(Base):
     token_anonimo = Column(String, unique=True, index=True, nullable=False)
     saldo_disponible = Column(Numeric(10, 2), default=0.00, nullable=False)
     rol = Column(String, nullable=False, default='beneficiario') # 'admin', 'upspain', 'gestor', 'supermercado', 'beneficiario'
+    
+    # Columnas exclusivas para roles con credenciales de acceso (ej: admin, gestor, supermercado)
+    email = Column(String, unique=True, index=True, nullable=True)
+    hashed_password = Column(String, nullable=True)
+    mfa_secret = Column(String, nullable=True) # Clave TOTP en Base32
+    mfa_enabled = Column(Boolean, default=False, nullable=False) # True si el QR ha sido vinculado y verificado
+    
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class ProductoSupermercado(Base):

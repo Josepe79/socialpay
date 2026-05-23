@@ -27,6 +27,49 @@ from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserMod
 from pydantic import BaseModel
 from typing import List, Optional
 
+import hashlib
+import secrets
+import pyotp
+from datetime import datetime, timedelta
+
+# ── Sistema de Sesiones y Seguridad (MFA / PBKDF2) ────────────────────────────
+ADMIN_SESSIONS = {} # Token -> { "user_id": UUID, "mfa_verified": bool, "expires": datetime }
+
+def hash_password(password: str, salt: str = None) -> str:
+    """Genera un hash seguro PBKDF2-SHA256 con sal para almacenar contraseñas."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    pwd_bytes = password.encode('utf-8')
+    salt_bytes = salt.encode('utf-8')
+    db_hash = hashlib.pbkdf2_hmac('sha256', pwd_bytes, salt_bytes, 100000)
+    return f"{salt}:{db_hash.hex()}"
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    """Verifica si una contraseña en texto plano coincide con su hash almacenado."""
+    if not hashed_password or ":" not in hashed_password:
+        return False
+    salt, _ = hashed_password.split(":", 1)
+    return hash_password(password, salt) == hashed_password
+
+async def get_current_admin(request: Request, db: Session = Depends(get_db)):
+    """Dependency para verificar sesión administrativa y MFA activado."""
+    session_token = request.cookies.get("session_token")
+    if not session_token or session_token not in ADMIN_SESSIONS:
+        return None
+    
+    sess = ADMIN_SESSIONS[session_token]
+    if datetime.now() > sess["expires"]:
+        ADMIN_SESSIONS.pop(session_token, None)
+        return None
+        
+    if not sess["mfa_verified"]:
+        return None
+        
+    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+    if not user or user.rol != "admin":
+        return None
+        
+    return user
 
 app = FastAPI(title="SocialPay MVP")
 
@@ -174,6 +217,37 @@ def init_db():
         print("[DB] Tablas SQLAlchemy inicializadas.")
     except Exception as e:
         print(f"[DB] Error creando tablas SQLAlchemy: {e}")
+
+    # Semilla del administrador admin@jepco.es con contraseña y MFA por defecto
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        admin_user = db.query(UserModel).filter(UserModel.email == "admin@jepco.es").first()
+        if not admin_user:
+            print("[DB] Creando usuario administrador semilla: admin@jepco.es...")
+            default_password = "JepcoAdmin2026!"
+            mfa_secret_key = pyotp.random_base32()
+            
+            new_admin = UserModel(
+                token_anonimo=f"ADMIN-TOKEN-{secrets.token_hex(4).upper()}",
+                saldo_disponible=0.00,
+                rol="admin",
+                email="admin@jepco.es",
+                hashed_password=hash_password(default_password),
+                mfa_secret=mfa_secret_key,
+                mfa_enabled=False # El primer login exigirá vincular el QR
+            )
+            db.add(new_admin)
+            db.commit()
+            print(f"[DB] Administrador semilla creado con éxito.")
+            print(f"[DB] Contraseña por defecto: {default_password}")
+            print(f"[DB] Clave secreta TOTP: {mfa_secret_key}")
+        else:
+            print("[DB] El administrador admin@jepco.es ya existe.")
+        db.close()
+    except Exception as e:
+        print(f"[DB] Error al sembrar administrador admin@jepco.es: {e}")
+
         
     try:
         conn = get_conn()
@@ -892,7 +966,178 @@ async def upload_ticket(
 async def get_audit_logs():
     return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
 
+from fastapi.responses import RedirectResponse
+import urllib.parse
+
+@app.get("/admin/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: Optional[str] = None):
+    # Si ya tiene sesión autenticada y verificada por MFA, redirigir directo al dashboard
+    session_token = request.cookies.get("session_token")
+    if session_token and session_token in ADMIN_SESSIONS:
+        sess = ADMIN_SESSIONS[session_token]
+        if sess["mfa_verified"] and datetime.now() < sess["expires"]:
+            return RedirectResponse(url="/admin/dashboard", status_code=303)
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"request": request, "state": "login", "error": error}
+    )
+
+@app.post("/admin/login")
+async def process_login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    # Buscar el usuario admin
+    user = db.query(UserModel).filter(UserModel.email == email.strip()).first()
+    if not user or user.rol != "admin":
+        return RedirectResponse(
+            url="/admin/login?error=" + urllib.parse.quote("Credenciales incorrectas o acceso no autorizado."),
+            status_code=303
+        )
+    
+    # Validar contraseña hashed mediante PBKDF2
+    if not verify_password(password, user.hashed_password):
+        return RedirectResponse(
+            url="/admin/login?error=" + urllib.parse.quote("Contraseña incorrecta."),
+            status_code=303
+        )
+        
+    # Crear sesión temporal (mfa_verified = False)
+    session_token = secrets.token_hex(32)
+    ADMIN_SESSIONS[session_token] = {
+        "user_id": user.id,
+        "mfa_verified": False,
+        "expires": datetime.now() + timedelta(minutes=5)
+    }
+    
+    # Redirigir a setup si el QR no ha sido escaneado aún, de lo contrario a verificación
+    next_url = "/admin/setup-mfa" if not user.mfa_enabled else "/admin/verify-mfa"
+    response = RedirectResponse(url=next_url, status_code=303)
+    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False)
+    return response
+
+@app.get("/admin/setup-mfa", response_class=HTMLResponse)
+async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
+    session_token = request.cookies.get("session_token")
+    if not session_token or session_token not in ADMIN_SESSIONS:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    sess = ADMIN_SESSIONS[session_token]
+    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+    if not user:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    if user.mfa_enabled:
+        return RedirectResponse(url="/admin/verify-mfa", status_code=303)
+        
+    # Generar URI de provisión TOTP para Authy/Google Authenticator
+    totp = pyotp.TOTP(user.mfa_secret)
+    provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="SocialPay")
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(provisioning_uri)}"
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={
+            "request": request,
+            "state": "setup",
+            "qr_url": qr_url,
+            "secret_key": user.mfa_secret,
+            "error": error
+        }
+    )
+
+@app.post("/admin/setup-mfa")
+async def process_setup_mfa(
+    request: Request,
+    code: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    session_token = request.cookies.get("session_token")
+    if not session_token or session_token not in ADMIN_SESSIONS:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    sess = ADMIN_SESSIONS[session_token]
+    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+    if not user or user.mfa_enabled:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    # Validar código TOTP de 6 dígitos ingresado por el usuario
+    totp = pyotp.TOTP(user.mfa_secret)
+    if totp.verify(code.strip()):
+        user.mfa_enabled = True
+        db.commit()
+        
+        # Validar la sesión
+        sess["mfa_verified"] = True
+        sess["expires"] = datetime.now() + timedelta(hours=2)
+        return RedirectResponse(url="/admin/dashboard", status_code=303)
+    else:
+        return RedirectResponse(
+            url="/admin/setup-mfa?error=" + urllib.parse.quote("Código MFA inválido. Reintenta."),
+            status_code=303
+        )
+
+@app.get("/admin/verify-mfa", response_class=HTMLResponse)
+async def verify_mfa_page(request: Request, error: Optional[str] = None):
+    session_token = request.cookies.get("session_token")
+    if not session_token or session_token not in ADMIN_SESSIONS:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    sess = ADMIN_SESSIONS[session_token]
+    if sess["mfa_verified"]:
+        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"request": request, "state": "verify", "error": error}
+    )
+
+@app.post("/admin/verify-mfa")
+async def process_verify_mfa(
+    request: Request,
+    code: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    session_token = request.cookies.get("session_token")
+    if not session_token or session_token not in ADMIN_SESSIONS:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    sess = ADMIN_SESSIONS[session_token]
+    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+    if not user:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    totp = pyotp.TOTP(user.mfa_secret)
+    if totp.verify(code.strip()):
+        sess["mfa_verified"] = True
+        sess["expires"] = datetime.now() + timedelta(hours=2)
+        return RedirectResponse(url="/admin/dashboard", status_code=303)
+    else:
+        return RedirectResponse(
+            url="/admin/verify-mfa?error=" + urllib.parse.quote("Código MFA incorrecto."),
+            status_code=303
+        )
+
+@app.get("/admin/logout")
+async def logout(request: Request):
+    session_token = request.cookies.get("session_token")
+    if session_token:
+        ADMIN_SESSIONS.pop(session_token, None)
+    response = RedirectResponse(url="/admin/login", status_code=303)
+    response.delete_cookie("session_token")
+    return response
+
 @app.get("/admin/dashboard", response_class=HTMLResponse)
-async def admin_dashboard():
+async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
+    # Protección de sesión de administrador y MFA
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
     html_path = BASE_DIR / "templates" / "dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))

@@ -7,4 +7,6 @@ jinja2
 psycopg2-binary
 google-generativeai
 sqlalchemy
+pyotp
+
 
