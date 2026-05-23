@@ -330,12 +330,31 @@
 <body>
 
     <div class="mobile-container">
-        <header>
-            <h1>SocialPay</h1>
+        <header style="display: flex; justify-content: space-between; align-items: center; padding: 20px 20px;">
+            <div style="width: 45px;"></div>
+            <h1 style="margin: 0; font-size: 1.5rem;">SocialPay</h1>
+            <a href="/beneficiario/logout" style="color: white; text-decoration: none; font-size: 0.8rem; background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px; font-weight: 500; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">Salir</a>
         </header>
 
         <div class="content">
-            <div class="card" id="supermarket-selector" style="margin-bottom: 20px;">
+            <!-- Billetera del Beneficiario (Seudonimizada) -->
+            <div class="card" style="background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%); color: white; border: none; margin-bottom: 5px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Beneficiario Seudonimizado</div>
+                        <div style="font-size: 0.9rem; font-weight: 600; color: #E2E8F0; display: flex; align-items: center; gap: 6px;">
+                            <span>👤</span> <span>{{ user.token_anonimo }}</span>
+                        </div>
+                    </div>
+                    <span style="font-size: 0.7rem; background: rgba(16, 185, 129, 0.2); color: #34D399; padding: 4px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.025em;">Activo</span>
+                </div>
+                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+                    <div style="font-size: 0.72rem; color: #94A3B8; margin-bottom: 4px;">Saldo FSE+ Disponible</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: white;" id="user-balance-display">€{{ "%.2f"|format(user.saldo_disponible) }}</div>
+                </div>
+            </div>
+
+            <div class="card" id="supermarket-selector" style="margin-bottom: 10px;">
                 <label for="supermarket" style="font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; display: block; color: var(--primary);">📍 Selecciona tu supermercado:</label>
                 <select id="supermarket" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 1rem; outline: none; background: #F9FAFB; color: var(--text-main);">
                     <option value="" disabled selected>Elige un supermercado...</option>
@@ -486,6 +505,7 @@
     </div>
 
     <script>
+        let userBalance = parseFloat("{{ user.saldo_disponible }}");
         let currentCartTotal = 0.00;
         let currentCartItems = [];
         let pendingProductName = "";
@@ -494,6 +514,14 @@
         function updateCartTotal(amount) {
             currentCartTotal += amount;
             document.getElementById('cart-total').textContent = `€${currentCartTotal.toFixed(2)}`;
+            
+            // Comprobar si el total supera el saldo disponible
+            if (currentCartTotal > userBalance) {
+                document.getElementById('cart-total').style.color = 'var(--danger)';
+                showToast("⚠️ Cuidado: El total del carrito supera tu saldo disponible.");
+            } else {
+                document.getElementById('cart-total').style.color = 'var(--primary)';
+            }
         }
 
         function addProductToList(name, price) {
@@ -932,6 +960,12 @@
                     statusColor = '#065F46';
                     statusBg = '#D1FAE5';
                     document.getElementById('btn-pay').classList.add('active');
+                    
+                    // Actualizar saldo disponible en pantalla tras el cobro exitoso
+                    if (report.new_balance !== undefined) {
+                        userBalance = report.new_balance;
+                        document.getElementById('user-balance-display').textContent = `€${userBalance.toFixed(2)}`;
+                    }
                 } else if (report.status === 'discrepancy') {
                     statusHeader = '⚠️ Discrepancia Detectada';
                     statusColor = '#92400E';

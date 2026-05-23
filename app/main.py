@@ -254,9 +254,25 @@ def init_db():
             print(f"[DB] Clave secreta TOTP: {mfa_secret_key}")
         else:
             print("[DB] El administrador admin@jepco.es ya existe.")
+            
+        # Semilla del beneficiario demo para pruebas
+        beneficiary_user = db.query(UserModel).filter(UserModel.token_anonimo == "BENEFICIARIO-DEMO").first()
+        if not beneficiary_user:
+            print("[DB] Creando usuario beneficiario semilla: BENEFICIARIO-DEMO...")
+            new_beneficiary = UserModel(
+                token_anonimo="BENEFICIARIO-DEMO",
+                saldo_disponible=150.00,
+                rol="beneficiario"
+            )
+            db.add(new_beneficiary)
+            db.commit()
+            print("[DB] Beneficiario semilla creado con éxito.")
+        else:
+            print("[DB] El beneficiario BENEFICIARIO-DEMO ya existe.")
+            
         db.close()
     except Exception as e:
-        print(f"[DB] Error al sembrar administrador admin@jepco.es: {e}")
+        print(f"[DB] Error al sembrar usuarios semilla: {e}")
 
     if not DATABASE_URL:
         print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria para productos")
@@ -497,10 +513,58 @@ def mem_search(q: str) -> list:
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+from fastapi.responses import RedirectResponse
+
 @app.get("/", response_class=HTMLResponse)
-async def read_root():
-    html_path = BASE_DIR / "templates" / "index.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+async def read_root(
+    request: Request,
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    token_val = token or request.cookies.get("beneficiary_token")
+    user = None
+    if token_val:
+        user = db.query(UserModel).filter(UserModel.token_anonimo == token_val.strip()).first()
+        
+    if not user:
+        return templates.TemplateResponse(
+            request=request,
+            name="beneficiary_login.html",
+            context={"request": request, "error": "Token no válido o no proporcionado" if token_val else None}
+        )
+        
+    response = templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"request": request, "user": user}
+    )
+    response.set_cookie(key="beneficiary_token", value=user.token_anonimo, httponly=True)
+    return response
+
+@app.post("/beneficiario/login")
+async def process_beneficiary_login(
+    request: Request,
+    token: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    token_val = token.strip()
+    user = db.query(UserModel).filter(UserModel.token_anonimo == token_val).first()
+    if not user:
+        return templates.TemplateResponse(
+            request=request,
+            name="beneficiary_login.html",
+            context={"request": request, "error": "Código de acceso no válido.", "entered_token": token_val}
+        )
+        
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(key="beneficiary_token", value=user.token_anonimo, httponly=True)
+    return response
+
+@app.get("/beneficiario/logout")
+async def beneficiary_logout():
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("beneficiary_token")
+    return response
 
 @app.post("/scan-product")
 async def scan_product(barcode: str = Form(...)):
@@ -912,11 +976,32 @@ def ocr_ticket_via_gemini(image_path: Path, cart_items: list, supermarket: str) 
 
 @app.post("/upload-ticket")
 async def upload_ticket(
+    request: Request,
     ticket: UploadFile = File(...),
     cart_total: float = Form(...),
     cart_items: str = Form(...),
-    supermarket: str = Form(...)
+    supermarket: str = Form(...),
+    db: Session = Depends(get_db)
 ):
+    # Obtener el beneficiario activo
+    beneficiary_token = request.cookies.get("beneficiary_token")
+    user = None
+    if beneficiary_token:
+        user = db.query(UserModel).filter(UserModel.token_anonimo == beneficiary_token.strip()).first()
+    
+    if not user:
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Acceso denegado. Beneficiario no autenticado."}
+        )
+
+    # Validar que no supere el saldo disponible en base de datos
+    if float(user.saldo_disponible) < cart_total:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Saldo insuficiente. Saldo disponible: €{float(user.saldo_disponible):.2f}"}
+        )
+
     file_path = UPLOAD_DIR / ticket.filename
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(ticket.file, buffer)
@@ -960,11 +1045,26 @@ async def upload_ticket(
                 barcode=mapping["barcode"]
             )
 
+        # Descontar del saldo del beneficiario en la base de datos
+        from decimal import Decimal
+        user.saldo_disponible -= Decimal(str(cart_total))
+        
+        # Registrar en la pista inmutable de auditoría (SQLAlchemy)
+        new_audit = ATModel(
+            usuario_uuid=user.id,
+            supermercado_id=supermarket,
+            total=Decimal(str(cart_total)),
+            estado="APPROVED"
+        )
+        db.add(new_audit)
+        db.commit()
+        db.refresh(new_audit)
+
         audit_record = {
-            "transaction_id": str(uuid.uuid4()),
-            "user_id": "USR-99X",
+            "transaction_id": str(new_audit.id),
+            "user_id": user.token_anonimo,
             "supermarket": supermarket,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": new_audit.timestamp.isoformat(),
             "cart_snapshot": parsed_cart_items,
             "ticket_image_path": str(file_path.absolute()),
             "status": "AUDITED_AND_APPROVED",
@@ -978,6 +1078,27 @@ async def upload_ticket(
 @app.get("/api/admin/audit-logs")
 async def get_audit_logs():
     return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
+
+@app.get("/api/admin/beneficiaries")
+async def list_beneficiaries(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    # Proteger con autenticación de admin y MFA
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    beneficiaries = db.query(UserModel).filter(UserModel.rol == "beneficiario").all()
+    return {
+        "beneficiaries": [
+            {
+                "id": str(b.id),
+                "token_anonimo": b.token_anonimo,
+                "saldo_disponible": float(b.saldo_disponible)
+            } for b in beneficiaries
+        ]
+    }
 
 from fastapi.responses import RedirectResponse
 import urllib.parse

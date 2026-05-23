@@ -109,6 +109,7 @@
     <div style="background: white; border-bottom: 1px solid var(--border); padding: 0 40px; display: flex; gap: 4px;">
         <button id="tab-audit" onclick="showTab('audit')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--primary); border-bottom: 3px solid var(--primary); cursor: pointer;">📋 Auditoría</button>
         <button id="tab-catalog" onclick="showTab('catalog')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">🛒 Catálogo de Productos</button>
+        <button id="tab-beneficiaries" onclick="showTab('beneficiaries')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">👥 Beneficiarios FSE+</button>
     </div>
 
     <div class="container" id="panel-audit">
@@ -164,6 +165,30 @@
                     </thead>
                     <tbody id="catalog-body">
                         <tr><td colspan="7" class="empty-state">Cargando catálogo...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beneficiarios FSE+ -->
+    <div class="container" id="panel-beneficiaries" style="display:none;">
+        <div class="card" style="padding: 24px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 1.2rem;">👥 Gestión de Beneficiarios FSE+ (Seudonimizada)</h2>
+            </div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>UUID</th>
+                            <th>Token Anónimo</th>
+                            <th>Saldo FSE+ Disponible</th>
+                            <th>Enlace Único de Acceso / Tarjeta</th>
+                        </tr>
+                    </thead>
+                    <tbody id="beneficiaries-body">
+                        <tr><td colspan="4" class="empty-state">Cargando beneficiarios...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -233,9 +258,53 @@
         function showTab(tab) {
             document.getElementById('panel-audit').style.display   = tab === 'audit'   ? 'block' : 'none';
             document.getElementById('panel-catalog').style.display = tab === 'catalog' ? 'block' : 'none';
+            document.getElementById('panel-beneficiaries').style.display = tab === 'beneficiaries' ? 'block' : 'none';
+            
             document.getElementById('tab-audit').style.cssText   = tab === 'audit'   ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
             document.getElementById('tab-catalog').style.cssText = tab === 'catalog' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
+            document.getElementById('tab-beneficiaries').style.cssText = tab === 'beneficiaries' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
+            
             if (tab === 'catalog') loadProducts();
+            if (tab === 'beneficiaries') loadBeneficiaries();
+        }
+
+        async function loadBeneficiaries() {
+            const tbody = document.getElementById('beneficiaries-body');
+            try {
+                const response = await fetch('/api/admin/beneficiaries');
+                const data = await response.json();
+                if (!data.beneficiaries || data.beneficiaries.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No hay beneficiarios registrados.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                data.beneficiaries.forEach(b => {
+                    const accessUrl = window.location.origin + '/?token=' + b.token_anonimo;
+                    tbody.innerHTML += `<tr>
+                        <td style="font-family:monospace;font-size:0.8rem;color:var(--text-muted)">${b.id}</td>
+                        <td style="font-weight:600;color:var(--primary)">${b.token_anonimo}</td>
+                        <td style="font-weight:600">€${b.saldo_disponible.toFixed(2)}</td>
+                        <td>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="text" readonly value="${accessUrl}" id="link-${b.token_anonimo}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;width:320px;font-size:0.85rem;color:var(--text-muted);background:#F9FAFB;">
+                                <button onclick="copyLink('${b.token_anonimo}')" style="padding:6px 12px;background:#10B981;color:white;border:none;border-radius:6px;font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;">Copiar</button>
+                                <a href="${accessUrl}" target="_blank" style="padding:6px 12px;background:#818CF8;color:white;text-decoration:none;border-radius:6px;font-size:0.8rem;font-weight:600;display:inline-block;">Simular</a>
+                            </div>
+                        </td>
+                    </tr>`;
+                });
+            } catch (error) {
+                console.error('Error cargando beneficiarios', error);
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Error al cargar la lista de beneficiarios.</td></tr>';
+            }
+        }
+
+        function copyLink(token) {
+            const input = document.getElementById('link-' + token);
+            input.select();
+            input.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(input.value);
+            alert('¡Enlace de acceso del beneficiario copiado!');
         }
 
         // ── Auditoría ─────────────────────────────────────────────────────────
