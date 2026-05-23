@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, File, UploadFile, Form, Query
+from fastapi import FastAPI, Request, File, UploadFile, Form, Query, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,6 +20,13 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logic.matcher import ProductMatcher
 from logic.validator import TicketValidator
+
+from sqlalchemy.orm import Session
+from app.database import get_db, engine
+from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel
+from pydantic import BaseModel
+from typing import List, Optional
+
 
 app = FastAPI(title="SocialPay MVP")
 
@@ -160,6 +167,14 @@ def init_db():
     if not DATABASE_URL:
         print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria")
         return
+    try:
+        # Crear tablas SQLAlchemy (Usuario, ProductoSupermercado, AuditoriaTransaccion)
+        print("[DB] Inicializando tablas SQLAlchemy...")
+        Base.metadata.create_all(bind=engine)
+        print("[DB] Tablas SQLAlchemy inicializadas.")
+    except Exception as e:
+        print(f"[DB] Error creando tablas SQLAlchemy: {e}")
+        
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -513,6 +528,222 @@ async def delete_product(barcode: str):
         return {"status": "deleted"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# ── Supermercado: Mantenimiento de Productos ──────────────────────────────────
+
+class SupermarketProductSchema(BaseModel):
+    supermercado_id: str
+    codigo_barras: str
+    nombre: str
+    precio: float
+    categoria_fse: Optional[str] = None
+    palabras_clave_ocr: Optional[List[str]] = []
+
+@app.post("/api/supermercado/producto")
+async def add_or_update_supermarket_product(
+    item: SupermarketProductSchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Mantenimiento individual por pantalla para añadir o actualizar un producto del supermercado.
+    Exclusivo para el rol 'supermercado'.
+    """
+    # Verificación de rol: cabecera X-Role o query param 'role' para facilitar pruebas
+    x_role = request.headers.get("X-Role") or request.query_params.get("role")
+    if x_role != "supermercado":
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Acceso denegado. Se requiere el rol 'supermercado'."}
+        )
+
+    # Validaciones de entrada
+    if not item.codigo_barras or not item.codigo_barras.strip():
+        return JSONResponse(status_code=400, content={"error": "El código de barras es obligatorio."})
+    if not item.nombre or not item.nombre.strip():
+        return JSONResponse(status_code=400, content={"error": "El nombre es obligatorio."})
+    if item.precio <= 0:
+        return JSONResponse(status_code=400, content={"error": "El precio debe ser mayor que 0."})
+
+    # Upsert en ProductoSupermercado (SQLAlchemy)
+    existing = db.query(PSModel).filter(
+        PSModel.supermercado_id == item.supermercado_id,
+        PSModel.codigo_barras == item.codigo_barras
+    ).first()
+
+    if existing:
+        existing.nombre = item.nombre
+        existing.precio = item.precio
+        existing.categoria_fse = item.categoria_fse
+        existing.palabras_clave_ocr = item.palabras_clave_ocr
+        db.commit()
+        db.refresh(existing)
+        status = "updated"
+        prod_id = existing.id
+    else:
+        new_prod = PSModel(
+            supermercado_id=item.supermercado_id,
+            codigo_barras=item.codigo_barras,
+            nombre=item.nombre,
+            precio=item.precio,
+            categoria_fse=item.categoria_fse,
+            palabras_clave_ocr=item.palabras_clave_ocr
+        )
+        db.add(new_prod)
+        db.commit()
+        db.refresh(new_prod)
+        status = "created"
+        prod_id = new_prod.id
+
+    return {
+        "status": status,
+        "id": prod_id,
+        "supermercado_id": item.supermercado_id,
+        "codigo_barras": item.codigo_barras,
+        "nombre": item.nombre
+    }
+
+@app.post("/api/supermercado/upload-batch")
+async def upload_batch_products(
+    request: Request,
+    supermercado_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Carga masiva (batch) de productos mediante un archivo CSV.
+    Procesa línea por línea, valida datos y actualiza de golpe (Bulk Update/Insert).
+    Exclusivo para el rol 'supermercado'.
+    """
+    # Verificación de rol
+    x_role = request.headers.get("X-Role") or request.query_params.get("role")
+    if x_role != "supermercado":
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Acceso denegado. Se requiere el rol 'supermercado'."}
+        )
+
+    if not file.filename.endswith('.csv'):
+        return JSONResponse(status_code=400, content={"error": "Solo se permiten archivos en formato CSV."})
+
+    import csv
+    import io
+    import re
+
+    try:
+        contents = await file.read()
+        decoded = contents.decode("utf-8")
+        csv_reader = csv.DictReader(io.StringIO(decoded))
+
+        # Validación e inferencia de cabeceras
+        actual_headers = set(csv_reader.fieldnames or [])
+        header_map = {}
+        for h in actual_headers:
+            h_lower = h.lower().strip()
+            if h_lower in ['codigo_barras', 'barcode', 'ean', 'code']:
+                header_map['codigo_barras'] = h
+            elif h_lower in ['nombre', 'name', 'producto', 'product']:
+                header_map['nombre'] = h
+            elif h_lower in ['precio', 'price', 'rate']:
+                header_map['precio'] = h
+            elif h_lower in ['categoria_fse', 'category', 'categoria']:
+                header_map['categoria_fse'] = h
+            elif h_lower in ['palabras_clave_ocr', 'keywords', 'keywords_ocr', 'palabras_clave']:
+                header_map['palabras_clave_ocr'] = h
+
+        # Comprobar que tenemos las 3 columnas obligatorias
+        if len({'codigo_barras', 'nombre', 'precio'}.intersection(header_map.keys())) < 3:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"El CSV debe contener al menos las columnas de 'codigo_barras', 'nombre' y 'precio'. Cabeceras detectadas: {list(actual_headers)}"}
+            )
+
+        # Cargar todos los productos actuales de este supermercado para evitar consultas N+1
+        existing_products = db.query(PSModel).filter(
+            PSModel.supermercado_id == supermercado_id
+        ).all()
+        existing_map = {p.codigo_barras: p for p in existing_products}
+
+        new_objects = []
+        updated_count = 0
+        created_count = 0
+        warnings = []
+
+        for idx, row in enumerate(csv_reader, start=1):
+            raw_barcode = row.get(header_map.get('codigo_barras'))
+            raw_name = row.get(header_map.get('nombre'))
+            raw_price = row.get(header_map.get('precio'))
+            raw_category = row.get(header_map.get('categoria_fse')) if 'categoria_fse' in header_map else None
+            raw_keywords = row.get(header_map.get('palabras_clave_ocr')) if 'palabras_clave_ocr' in header_map else None
+
+            # Validar campos vacíos
+            if not raw_barcode or not raw_barcode.strip():
+                warnings.append(f"Fila {idx}: Código de barras vacío, fila omitida.")
+                continue
+            if not raw_name or not raw_name.strip():
+                warnings.append(f"Fila {idx}: Nombre de producto vacío, fila omitida.")
+                continue
+
+            # Validar y convertir precio
+            try:
+                price_str = raw_price.replace(',', '.').strip() if raw_price else "0"
+                price_val = float(price_str)
+                if price_val <= 0:
+                    raise ValueError()
+            except (ValueError, TypeError):
+                warnings.append(f"Fila {idx}: Precio inválido ('{raw_price}'), fila omitida.")
+                continue
+
+            barcode = raw_barcode.strip()
+            nombre = raw_name.strip()
+            categoria_fse = raw_category.strip() if raw_category else None
+
+            # Parsear palabras clave (separadas por coma o punto y coma)
+            keywords = []
+            if raw_keywords:
+                keywords = [k.strip() for k in re.split(r'[;,]', raw_keywords) if k.strip()]
+
+            # Realizar Upsert
+            if barcode in existing_map:
+                existing_item = existing_map[barcode]
+                existing_item.nombre = nombre
+                existing_item.precio = price_val
+                existing_item.categoria_fse = categoria_fse
+                existing_item.palabras_clave_ocr = keywords
+                updated_count += 1
+            else:
+                new_item = PSModel(
+                    supermercado_id=supermercado_id,
+                    codigo_barras=barcode,
+                    nombre=nombre,
+                    precio=price_val,
+                    categoria_fse=categoria_fse,
+                    palabras_clave_ocr=keywords
+                )
+                new_objects.append(new_item)
+                created_count += 1
+
+        # Inserción de lote masivo
+        if new_objects:
+            db.bulk_save_objects(new_objects)
+        
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": f"Carga masiva completada con éxito para '{supermercado_id}'.",
+            "creados": created_count,
+            "actualizados": updated_count,
+            "total_procesado": created_count + updated_count,
+            "advertencias": warnings
+        }
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error crítico al procesar la carga batch: {str(e)}"}
+        )
 
 # ── Ticket upload & OCR Validation ──────────────────────────────────────────
 
