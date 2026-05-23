@@ -1079,17 +1079,32 @@ async def upload_ticket(
 async def get_audit_logs():
     return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
 
+# Pydantic schemas for User Management CRUD
+class BeneficiarySchema(BaseModel):
+    token_anonimo: str
+    saldo_disponible: float
+
+class SystemUserCreateSchema(BaseModel):
+    email: str
+    password: str
+    rol: str
+
+class SystemUserUpdateSchema(BaseModel):
+    email: str
+    password: Optional[str] = None
+    rol: str
+
+# 1. Endpoints de Beneficiarios (CRUD)
+
 @app.get("/api/admin/beneficiaries")
 async def list_beneficiaries(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    # Proteger con autenticación de admin y MFA
     admin = await get_current_admin(request, db)
     if not admin:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
-        
-    beneficiaries = db.query(UserModel).filter(UserModel.rol == "beneficiario").all()
+    beneficiaries = db.query(UserModel).filter(UserModel.rol == "beneficiario").order_by(UserModel.created_at.desc()).all()
     return {
         "beneficiaries": [
             {
@@ -1099,6 +1114,236 @@ async def list_beneficiaries(
             } for b in beneficiaries
         ]
     }
+
+@app.post("/api/admin/beneficiaries")
+async def create_beneficiary(
+    item: BeneficiarySchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    token_val = item.token_anonimo.strip()
+    if not token_val:
+        return JSONResponse(status_code=400, content={"error": "El token anónimo es obligatorio."})
+        
+    existing = db.query(UserModel).filter(UserModel.token_anonimo == token_val).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Este token de beneficiario ya existe."})
+        
+    new_user = UserModel(
+        token_anonimo=token_val,
+        saldo_disponible=item.saldo_disponible,
+        rol="beneficiario"
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {
+        "status": "created",
+        "beneficiary": {
+            "id": str(new_user.id),
+            "token_anonimo": new_user.token_anonimo,
+            "saldo_disponible": float(new_user.saldo_disponible)
+        }
+    }
+
+@app.put("/api/admin/beneficiaries/{user_id}")
+async def update_beneficiary(
+    user_id: str,
+    item: BeneficiarySchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Beneficiario no encontrado."})
+        
+    token_val = item.token_anonimo.strip()
+    if not token_val:
+        return JSONResponse(status_code=400, content={"error": "El token anónimo es obligatorio."})
+        
+    existing = db.query(UserModel).filter(UserModel.token_anonimo == token_val, UserModel.id != user.id).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Este token de beneficiario ya está en uso."})
+        
+    user.token_anonimo = token_val
+    user.saldo_disponible = item.saldo_disponible
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "status": "updated",
+        "beneficiary": {
+            "id": str(user.id),
+            "token_anonimo": user.token_anonimo,
+            "saldo_disponible": float(user.saldo_disponible)
+        }
+    }
+
+@app.delete("/api/admin/beneficiaries/{user_id}")
+async def delete_beneficiary(
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Beneficiario no encontrado."})
+        
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted"}
+
+# 2. Endpoints de Personal del Sistema (CRUD)
+
+@app.get("/api/admin/system-users")
+async def list_system_users(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    users = db.query(UserModel).filter(UserModel.rol != "beneficiario").order_by(UserModel.created_at.desc()).all()
+    return {
+        "users": [
+            {
+                "id": str(u.id),
+                "email": u.email,
+                "rol": u.rol,
+                "mfa_enabled": u.mfa_enabled
+            } for u in users
+        ]
+    }
+
+@app.post("/api/admin/system-users")
+async def create_system_user(
+    item: SystemUserCreateSchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    email_val = item.email.strip()
+    password_val = item.password.strip()
+    rol_val = item.rol.strip()
+    
+    if not email_val or not password_val or not rol_val:
+        return JSONResponse(status_code=400, content={"error": "Todos los campos son obligatorios."})
+        
+    if rol_val not in ["admin", "upspain", "gestor", "supermercado"]:
+        return JSONResponse(status_code=400, content={"error": "Rol no válido."})
+        
+    existing = db.query(UserModel).filter(UserModel.email == email_val).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Este correo electrónico ya está registrado."})
+        
+    # Crear usuario de personal
+    new_user = UserModel(
+        token_anonimo=f"STAFF-TOKEN-{secrets.token_hex(4).upper()}",
+        email=email_val,
+        hashed_password=hash_password(password_val),
+        rol=rol_val,
+        mfa_secret=pyotp.random_base32(),
+        mfa_enabled=False
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {
+        "status": "created",
+        "user": {
+            "id": str(new_user.id),
+            "email": new_user.email,
+            "rol": new_user.rol,
+            "mfa_enabled": new_user.mfa_enabled
+        }
+    }
+
+@app.put("/api/admin/system-users/{user_id}")
+async def update_system_user(
+    user_id: str,
+    item: SystemUserUpdateSchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol != "beneficiario").first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Usuario no encontrado."})
+        
+    email_val = item.email.strip()
+    rol_val = item.rol.strip()
+    
+    if not email_val or not rol_val:
+        return JSONResponse(status_code=400, content={"error": "Email y Rol son obligatorios."})
+        
+    if rol_val not in ["admin", "upspain", "gestor", "supermercado"]:
+        return JSONResponse(status_code=400, content={"error": "Rol no válido."})
+        
+    existing = db.query(UserModel).filter(UserModel.email == email_val, UserModel.id != user.id).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Este correo electrónico ya está en uso por otro usuario."})
+        
+    user.email = email_val
+    user.rol = rol_val
+    
+    if item.password and item.password.strip():
+        user.hashed_password = hash_password(item.password.strip())
+        
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "status": "updated",
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "rol": user.rol,
+            "mfa_enabled": user.mfa_enabled
+        }
+    }
+
+@app.delete("/api/admin/system-users/{user_id}")
+async def delete_system_user(
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    # Evitar auto-eliminación
+    if str(admin.id) == user_id:
+        return JSONResponse(status_code=400, content={"error": "No puedes eliminar tu propia cuenta de administrador activo."})
+        
+    user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol != "beneficiario").first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Usuario no encontrado."})
+        
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted"}
 
 from fastapi.responses import RedirectResponse
 import urllib.parse

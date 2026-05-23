@@ -110,6 +110,7 @@
         <button id="tab-audit" onclick="showTab('audit')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--primary); border-bottom: 3px solid var(--primary); cursor: pointer;">📋 Auditoría</button>
         <button id="tab-catalog" onclick="showTab('catalog')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">🛒 Catálogo de Productos</button>
         <button id="tab-beneficiaries" onclick="showTab('beneficiaries')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">👥 Beneficiarios FSE+</button>
+        <button id="tab-staff" onclick="showTab('staff')" style="padding: 14px 20px; border: none; background: none; font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer;">⚙️ Personal del Sistema</button>
     </div>
 
     <div class="container" id="panel-audit">
@@ -176,6 +177,7 @@
         <div class="card" style="padding: 24px; margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; font-size: 1.2rem;">👥 Gestión de Beneficiarios FSE+ (Seudonimizada)</h2>
+                <button onclick="showBeneficiaryModal()" style="padding: 8px 18px; background: var(--primary); color: white; border: none; border-radius: 8px; font-family: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;">+ Añadir Beneficiario</button>
             </div>
             <div style="overflow-x: auto;">
                 <table>
@@ -184,11 +186,38 @@
                             <th>UUID</th>
                             <th>Token Anónimo</th>
                             <th>Saldo FSE+ Disponible</th>
-                            <th>Enlace Único de Acceso / Tarjeta</th>
+                            <th>Enlace Único / Simulación</th>
+                            <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody id="beneficiaries-body">
-                        <tr><td colspan="4" class="empty-state">Cargando beneficiarios...</td></tr>
+                        <tr><td colspan="5" class="empty-state">Cargando beneficiarios...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Personal del Sistema -->
+    <div class="container" id="panel-system-users" style="display:none;">
+        <div class="card" style="padding: 24px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 1.2rem;">⚙️ Personal del Sistema (Roles y Accesos)</h2>
+                <button onclick="showStaffModal()" style="padding: 8px 18px; background: var(--primary); color: white; border: none; border-radius: 8px; font-family: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;">+ Añadir Personal</button>
+            </div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>UUID</th>
+                            <th>Correo Electrónico</th>
+                            <th>Rol Asignado</th>
+                            <th>MFA Activado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="system-users-body">
+                        <tr><td colspan="5" class="empty-state">Cargando personal...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -253,28 +282,81 @@
         </div>
     </div>
 
+    <!-- Modal Añadir/Editar Beneficiario -->
+    <div id="beneficiary-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:white; border-radius:12px; padding:28px; width:90%; max-width:440px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin:0 0 20px 0;" id="beneficiary-modal-title">Añadir Beneficiario FSE+</h3>
+            <form id="beneficiary-form" onsubmit="submitBeneficiary(event)" style="display:flex; flex-direction:column; gap:16px;">
+                <input type="hidden" id="b-id" name="id">
+                <label style="font-size:0.85rem; font-weight:600; display:flex; flex-direction:column; gap:6px;">Token Anónimo (Seudonimizado) *
+                    <input id="b-token" name="token_anonimo" required placeholder="Ej: BENEFICIARIO-DEMO" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                </label>
+                <label style="font-size:0.85rem; font-weight:600; display:flex; flex-direction:column; gap:6px;">Saldo Disponible FSE+ (€) *
+                    <input id="b-balance" name="saldo_disponible" type="number" step="0.01" min="0" required placeholder="0.00" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                </label>
+                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:8px;">
+                    <button type="button" onclick="closeBeneficiaryModal()" style="padding:10px 20px; border:1px solid var(--border); background:white; border-radius:8px; font-family:inherit; cursor:pointer;">Cancelar</button>
+                    <button type="submit" style="padding:10px 24px; background:var(--primary); color:white; border:none; border-radius:8px; font-family:inherit; font-weight:600; cursor:pointer;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Añadir/Editar Personal -->
+    <div id="staff-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:white; border-radius:12px; padding:28px; width:90%; max-width:440px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin:0 0 20px 0;" id="staff-modal-title">Añadir Personal del Sistema</h3>
+            <form id="staff-form" onsubmit="submitStaff(event)" style="display:flex; flex-direction:column; gap:16px;">
+                <input type="hidden" id="s-id" name="id">
+                <label style="font-size:0.85rem; font-weight:600; display:flex; flex-direction:column; gap:6px;">Correo Electrónico *
+                    <input id="s-email" name="email" type="email" required placeholder="Ej: gestor1@jepco.es" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                </label>
+                <label style="font-size:0.85rem; font-weight:600; display:flex; flex-direction:column; gap:6px;" id="s-pass-label">Contraseña *
+                    <input id="s-pass" name="password" type="password" placeholder="Contraseña de acceso" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.95rem; box-sizing:border-box;">
+                    <span id="s-pass-note" style="font-size:0.75rem; color:var(--text-muted); font-weight:normal; display:none;">(Dejar en blanco para conservar la actual)</span>
+                </label>
+                <label style="font-size:0.85rem; font-weight:600; display:flex; flex-direction:column; gap:6px;">Rol Asignado *
+                    <select id="s-role" name="rol" required style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:0.9rem;">
+                        <option value="gestor">Gestor Social (Ayuntamiento)</option>
+                        <option value="supermercado">Supermercado (Tienda)</option>
+                        <option value="upspain">Up Spain (Emisor)</option>
+                        <option value="admin">Administrador General</option>
+                    </select>
+                </label>
+                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:8px;">
+                    <button type="button" onclick="closeStaffModal()" style="padding:10px 20px; border:1px solid var(--border); background:white; border-radius:8px; font-family:inherit; cursor:pointer;">Cancelar</button>
+                    <button type="submit" style="padding:10px 24px; background:var(--primary); color:white; border:none; border-radius:8px; font-family:inherit; font-weight:600; cursor:pointer;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // ── Tab switching ─────────────────────────────────────────────────────
         function showTab(tab) {
             document.getElementById('panel-audit').style.display   = tab === 'audit'   ? 'block' : 'none';
             document.getElementById('panel-catalog').style.display = tab === 'catalog' ? 'block' : 'none';
             document.getElementById('panel-beneficiaries').style.display = tab === 'beneficiaries' ? 'block' : 'none';
+            document.getElementById('panel-system-users').style.display = tab === 'staff' ? 'block' : 'none';
             
             document.getElementById('tab-audit').style.cssText   = tab === 'audit'   ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
             document.getElementById('tab-catalog').style.cssText = tab === 'catalog' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
             document.getElementById('tab-beneficiaries').style.cssText = tab === 'beneficiaries' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
+            document.getElementById('tab-staff').style.cssText = tab === 'staff' ? 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--primary);border-bottom:3px solid var(--primary);cursor:pointer;' : 'padding:14px 20px;border:none;background:none;font-family:inherit;font-size:0.95rem;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;cursor:pointer;';
             
             if (tab === 'catalog') loadProducts();
             if (tab === 'beneficiaries') loadBeneficiaries();
+            if (tab === 'staff') loadSystemUsers();
         }
 
+        // ── Beneficiarios ─────────────────────────────────────────────────────
         async function loadBeneficiaries() {
             const tbody = document.getElementById('beneficiaries-body');
             try {
                 const response = await fetch('/api/admin/beneficiaries');
                 const data = await response.json();
                 if (!data.beneficiaries || data.beneficiaries.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No hay beneficiarios registrados.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay beneficiarios registrados.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = '';
@@ -291,11 +373,17 @@
                                 <a href="${accessUrl}" target="_blank" style="padding:6px 12px;background:#818CF8;color:white;text-decoration:none;border-radius:6px;font-size:0.8rem;font-weight:600;display:inline-block;">Simular</a>
                             </div>
                         </td>
+                        <td>
+                            <div style="display:flex;gap:8px;">
+                                <button onclick="editBeneficiary('${b.id}', '${b.token_anonimo}', ${b.saldo_disponible})" style="padding:6px 12px;background:#3B82F6;color:white;border:none;border-radius:6px;font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;">Editar</button>
+                                <button onclick="deleteBeneficiary('${b.id}', '${b.token_anonimo}')" style="padding:6px 12px;background:#EF4444;color:white;border:none;border-radius:6px;font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;">Eliminar</button>
+                            </div>
+                        </td>
                     </tr>`;
                 });
             } catch (error) {
                 console.error('Error cargando beneficiarios', error);
-                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Error al cargar la lista de beneficiarios.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Error al cargar la lista de beneficiarios.</td></tr>';
             }
         }
 
@@ -305,6 +393,204 @@
             input.setSelectionRange(0, 99999);
             navigator.clipboard.writeText(input.value);
             alert('¡Enlace de acceso del beneficiario copiado!');
+        }
+
+        function showBeneficiaryModal() {
+            document.getElementById('beneficiary-modal-title').textContent = 'Añadir Beneficiario FSE+';
+            document.getElementById('b-id').value = '';
+            document.getElementById('b-token').value = '';
+            document.getElementById('b-balance').value = '';
+            document.getElementById('b-token').disabled = false;
+            document.getElementById('beneficiary-modal').style.display = 'flex';
+        }
+
+        function editBeneficiary(id, token, balance) {
+            document.getElementById('beneficiary-modal-title').textContent = 'Editar Beneficiario FSE+';
+            document.getElementById('b-id').value = id;
+            document.getElementById('b-token').value = token;
+            document.getElementById('b-balance').value = balance;
+            document.getElementById('b-token').disabled = false;
+            document.getElementById('beneficiary-modal').style.display = 'flex';
+        }
+
+        function closeBeneficiaryModal() {
+            document.getElementById('beneficiary-modal').style.display = 'none';
+            document.getElementById('beneficiary-form').reset();
+        }
+
+        async function submitBeneficiary(e) {
+            e.preventDefault();
+            const id = document.getElementById('b-id').value;
+            const token = document.getElementById('b-token').value.trim();
+            const balance = document.getElementById('b-balance').value;
+
+            const payload = {
+                token_anonimo: token,
+                saldo_disponible: parseFloat(balance)
+            };
+
+            const url = id ? `/api/admin/beneficiaries/${id}` : '/api/admin/beneficiaries';
+            const method = id ? 'PUT' : 'POST';
+
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    closeBeneficiaryModal();
+                    loadBeneficiaries();
+                } else {
+                    alert('Error: ' + (data.error || JSON.stringify(data)));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error en la comunicación con el servidor');
+            }
+        }
+
+        async function deleteBeneficiary(id, token) {
+            if (!confirm(`¿Estás seguro de que deseas eliminar al beneficiario con token "${token}"?`)) return;
+            try {
+                const response = await fetch(`/api/admin/beneficiaries/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (response.ok) {
+                    loadBeneficiaries();
+                } else {
+                    alert('Error: ' + (data.error || JSON.stringify(data)));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error al intentar eliminar el beneficiario');
+            }
+        }
+
+        // ── Personal del Sistema ────────────────────────────────────────────────
+        async function loadSystemUsers() {
+            const tbody = document.getElementById('system-users-body');
+            try {
+                const response = await fetch('/api/admin/system-users');
+                const data = await response.json();
+                if (!data.users || data.users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay personal registrado.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                const roleLabels = {
+                    admin: 'Administrador',
+                    upspain: 'Up Spain',
+                    gestor: 'Gestor Social',
+                    supermercado: 'Supermercado'
+                };
+                data.users.forEach(u => {
+                    const roleLabel = roleLabels[u.rol] || u.rol;
+                    const mfaText = u.mfa_enabled ? '✅ Activado' : '❌ Desactivado';
+                    tbody.innerHTML += `<tr>
+                        <td style="font-family:monospace;font-size:0.8rem;color:var(--text-muted)">${u.id}</td>
+                        <td style="font-weight:500;">${u.email}</td>
+                        <td><span style="background:#EEF2F6;color:#1E293B;padding:4px 8px;border-radius:6px;font-size:0.8rem;font-weight:500;">${roleLabel}</span></td>
+                        <td>${mfaText}</td>
+                        <td>
+                            <div style="display:flex;gap:8px;">
+                                <button onclick="editStaff('${u.id}', '${u.email}', '${u.rol}')" style="padding:6px 12px;background:#3B82F6;color:white;border:none;border-radius:6px;font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;">Editar</button>
+                                <button onclick="deleteStaff('${u.id}', '${u.email}')" style="padding:6px 12px;background:#EF4444;color:white;border:none;border-radius:6px;font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;">Eliminar</button>
+                            </div>
+                        </td>
+                    </tr>`;
+                });
+            } catch (error) {
+                console.error('Error cargando personal del sistema', error);
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Error al cargar la lista de personal.</td></tr>';
+            }
+        }
+
+        function showStaffModal() {
+            document.getElementById('staff-modal-title').textContent = 'Añadir Personal del Sistema';
+            document.getElementById('s-id').value = '';
+            document.getElementById('s-email').value = '';
+            document.getElementById('s-pass').value = '';
+            document.getElementById('s-pass').required = true;
+            document.getElementById('s-pass-note').style.display = 'none';
+            document.getElementById('s-pass-label').childNodes[0].textContent = 'Contraseña *';
+            document.getElementById('s-role').value = 'gestor';
+            document.getElementById('staff-modal').style.display = 'flex';
+        }
+
+        function editStaff(id, email, role) {
+            document.getElementById('staff-modal-title').textContent = 'Editar Personal del Sistema';
+            document.getElementById('s-id').value = id;
+            document.getElementById('s-email').value = email;
+            document.getElementById('s-pass').value = '';
+            document.getElementById('s-pass').required = false;
+            document.getElementById('s-pass-note').style.display = 'inline';
+            document.getElementById('s-pass-label').childNodes[0].textContent = 'Contraseña ';
+            document.getElementById('s-role').value = role;
+            document.getElementById('staff-modal').style.display = 'flex';
+        }
+
+        function closeStaffModal() {
+            document.getElementById('staff-modal').style.display = 'none';
+            document.getElementById('staff-form').reset();
+        }
+
+        async function submitStaff(e) {
+            e.preventDefault();
+            const id = document.getElementById('s-id').value;
+            const email = document.getElementById('s-email').value.trim();
+            const password = document.getElementById('s-pass').value;
+            const role = document.getElementById('s-role').value;
+
+            const payload = {
+                email: email,
+                rol: role
+            };
+            if (password) {
+                payload.password = password;
+            }
+
+            if (!id && !password) {
+                alert('La contraseña es obligatoria para nuevos usuarios.');
+                return;
+            }
+
+            const url = id ? `/api/admin/system-users/${id}` : '/api/admin/system-users';
+            const method = id ? 'PUT' : 'POST';
+
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    closeStaffModal();
+                    loadSystemUsers();
+                } else {
+                    alert('Error: ' + (data.error || JSON.stringify(data)));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error en la comunicación con el servidor');
+            }
+        }
+
+        async function deleteStaff(id, email) {
+            if (!confirm(`¿Estás seguro de que deseas eliminar al usuario "${email}"?`)) return;
+            try {
+                const response = await fetch(`/api/admin/system-users/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (response.ok) {
+                    loadSystemUsers();
+                } else {
+                    alert('Error: ' + (data.error || JSON.stringify(data)));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Error al intentar eliminar el usuario');
+            }
         }
 
         // ── Auditoría ─────────────────────────────────────────────────────────
