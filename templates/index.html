@@ -488,6 +488,8 @@
     <script>
         let currentCartTotal = 0.00;
         let currentCartItems = [];
+        let pendingProductName = "";
+        let pendingBarcode = "";
 
         function updateCartTotal(amount) {
             currentCartTotal += amount;
@@ -723,7 +725,8 @@
                         const icon = getCategoryIcon(p.categories_tags);
                         const name = p.name;
                         const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                        return `<div onclick="selectSearchProduct('${escaped}', '${icon}')"
+                        const barcode = p.barcode || '';
+                        return `<div onclick="selectSearchProduct('${escaped}', '${icon}', '${barcode}')"
                                      style="padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(0,0,0,0.06); color: var(--text-main); font-size: 0.9rem; transition: background 0.15s;"
                                      onmouseover="this.style.background='#F0FDF4'"
                                      onmouseout="this.style.background='transparent'">
@@ -740,8 +743,8 @@
             }, 400);
         }
 
-        function selectSearchProduct(name, icon) {
-            selectedSearchProduct = { name, icon };
+        function selectSearchProduct(name, icon, barcode = '') {
+            selectedSearchProduct = { name, icon, barcode };
             document.getElementById('product-search-input').value = name;
             document.getElementById('search-dropdown').style.display = 'none';
 
@@ -767,11 +770,16 @@
                 return;
             }
 
-            const { name, icon } = selectedSearchProduct;
+            const { name, icon, barcode } = selectedSearchProduct;
             const displayName = `${icon} ${name}`;
 
             addProductToList(displayName, price);
-            currentCartItems.push({ name: displayName, price });
+            currentCartItems.push({
+                name: displayName,
+                price: price,
+                barcode: barcode || null,
+                clean_name: name
+            });
             updateCartTotal(price);
             playBeep();
             if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(80);
@@ -833,6 +841,7 @@
                 
                 if (data.allowed) {
                     pendingProductName = data.name;
+                    pendingBarcode = simulatedBarcode;
                     document.getElementById('price-modal-product-name').textContent = pendingProductName;
                     document.getElementById('price-input').value = "";
                     document.getElementById('price-modal').classList.add('show');
@@ -848,6 +857,7 @@
         function closePriceModal() {
             document.getElementById('price-modal').classList.remove('show');
             pendingProductName = "";
+            pendingBarcode = "";
         }
 
         function submitPrice() {
@@ -862,7 +872,12 @@
             }
 
             addProductToList(pendingProductName, userPrice);
-            currentCartItems.push({ name: pendingProductName, price: userPrice });
+            currentCartItems.push({
+                name: pendingProductName,
+                price: userPrice,
+                barcode: pendingBarcode || null,
+                clean_name: pendingProductName
+            });
             updateCartTotal(userPrice);
             showToast(`Añadido: ${pendingProductName} por €${userPrice.toFixed(2)}`);
             closePriceModal();

@@ -52,7 +52,7 @@ class TicketValidator:
             
         return ratio
 
-    def validate(self, cart_items: list, cart_total: float, ticket_data: dict) -> dict:
+    def validate(self, cart_items: list, cart_total: float, ticket_data: dict, get_mapping_func=None, supermarket: str = None) -> dict:
         """
         Validates the cart against the OCR extracted ticket data.
         
@@ -68,7 +68,8 @@ class TicketValidator:
                 "message": "No se pudo extraer la información del ticket.",
                 "total_ok": False,
                 "score": 0,
-                "items": []
+                "items": [],
+                "learned_mappings": []
             }
 
         ticket_total = ticket_data.get("total", 0.0)
@@ -77,6 +78,7 @@ class TicketValidator:
 
         validation_items = []
         ticket_items = ticket_data.get("items", [])[:] # Copy to manipulate
+        learned_mappings = []
         
         matches = 0
         
@@ -84,16 +86,32 @@ class TicketValidator:
         for cart_item in cart_items:
             cart_name = cart_item.get("name", "")
             cart_price = float(cart_item.get("price", 0.0))
+            cart_barcode = cart_item.get("barcode")
             
             best_match_idx = -1
             best_score = 0
+            best_was_mapped = False
             
             # Find the best matching item in the ticket
             for idx, t_item in enumerate(ticket_items):
-                score = self.fuzzy_match(cart_name, t_item.get("name", ""))
+                is_mapped = False
+                t_name = t_item.get("name", "")
+                
+                # Check if this raw ticket item name has been mapped to this barcode
+                if get_mapping_func and cart_barcode and t_name and supermarket:
+                    mapped_barcode = get_mapping_func(supermarket, t_name)
+                    if mapped_barcode == cart_barcode:
+                        is_mapped = True
+                
+                if is_mapped:
+                    score = 1.0
+                else:
+                    score = self.fuzzy_match(cart_name, t_name)
+                
                 if score > best_score:
                     best_score = score
                     best_match_idx = idx
+                    best_was_mapped = is_mapped
             
             if best_match_idx != -1 and best_score >= self.name_tolerance:
                 t_item = ticket_items.pop(best_match_idx)
@@ -103,6 +121,13 @@ class TicketValidator:
                 if price_diff <= self.price_tolerance:
                     match_status = "ok"
                     matches += 1
+                    # If this match was successfully verified and is a new mapping, learn it
+                    if cart_barcode and supermarket and t_item.get("name") and not best_was_mapped:
+                        learned_mappings.append({
+                            "supermarket": supermarket,
+                            "raw_name": t_item.get("name"),
+                            "barcode": cart_barcode
+                        })
                 else:
                     match_status = "price_diff"
                 
@@ -143,5 +168,6 @@ class TicketValidator:
             "ticket_total": ticket_total,
             "cart_total": cart_total,
             "score": score_pct,
-            "items": validation_items
+            "items": validation_items,
+            "learned_mappings": learned_mappings
         }

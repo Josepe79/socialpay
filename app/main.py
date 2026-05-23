@@ -188,6 +188,19 @@ def init_db():
             )
         """)
 
+        # Tabla de mapeos de aprendizaje activo
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ticket_product_mappings (
+                id              SERIAL PRIMARY KEY,
+                supermarket     TEXT NOT NULL,
+                raw_ticket_name TEXT NOT NULL,
+                barcode         TEXT NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
+                created_at      TIMESTAMP DEFAULT NOW(),
+                UNIQUE(supermarket, raw_ticket_name)
+            )
+        """)
+
+
         # Carga semilla solo si la tabla está vacía
         cur.execute("SELECT COUNT(*) FROM products")
         count = cur.fetchone()[0]
@@ -316,7 +329,63 @@ def db_all_products(supermarket: str = None) -> list:
         print(f"[DB] List error: {e}")
         return []
 
+def db_get_barcode_by_mapping(supermarket: str, raw_ticket_name: str) -> str | None:
+    """Busca si un nombre del ticket ya ha sido mapeado a un código de barras para este supermercado."""
+    if not DATABASE_URL:
+        return None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT barcode FROM ticket_product_mappings
+            WHERE lower(supermarket) = lower(%s) AND lower(raw_ticket_name) = lower(%s)
+        """, (supermarket.strip(), raw_ticket_name.strip()))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        print(f"[DB] Error looking up ticket mapping: {e}")
+        return None
+
+def db_save_ticket_mapping(supermarket: str, raw_ticket_name: str, barcode: str):
+    """Guarda un mapeo de nombre de ticket a código de barras para un supermercado."""
+    if not DATABASE_URL:
+        return
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO ticket_product_mappings (supermarket, raw_ticket_name, barcode)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (supermarket, raw_ticket_name) DO UPDATE
+              SET barcode = EXCLUDED.barcode
+        """, (supermarket.strip(), raw_ticket_name.strip(), barcode.strip()))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"[DB] Mapeo guardado: [{supermarket}] '{raw_ticket_name}' -> Barcode '{barcode}'")
+    except Exception as e:
+        print(f"[DB] Error saving ticket mapping: {e}")
+
 # ── Fallback en memoria (si no hay DB) ────────────────────────────────────────
+MEM_TICKET_MAPPINGS = {}
+
+def get_ticket_mapping(supermarket: str, raw_ticket_name: str) -> str | None:
+    """Busca un mapeo en BBDD o en memoria si no hay BBDD."""
+    barcode = db_get_barcode_by_mapping(supermarket, raw_ticket_name)
+    if barcode:
+        return barcode
+    return MEM_TICKET_MAPPINGS.get((supermarket.lower().strip(), raw_ticket_name.lower().strip()))
+
+def save_ticket_mapping(supermarket: str, raw_ticket_name: str, barcode: str):
+    """Guarda un mapeo en BBDD o en memoria si no hay BBDD."""
+    if DATABASE_URL:
+        db_save_ticket_mapping(supermarket, raw_ticket_name, barcode)
+    else:
+        MEM_TICKET_MAPPINGS[(supermarket.lower().strip(), raw_ticket_name.lower().strip())] = barcode
+        print(f"[Memory] Mapeo guardado: [{supermarket}] '{raw_ticket_name}' -> Barcode '{barcode}'")
+
 MEM_CATALOG = [(b, n, c) for b, n, c in SEED_CATALOG]
 
 def mem_search(q: str) -> list:
@@ -450,8 +519,8 @@ async def delete_product(barcode: str):
 def get_gemini_key():
     return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
 
-def ocr_ticket_via_gemini(image_path: Path) -> tuple[dict | None, str | None]:
-    """Uses Gemini 1.5 Flash to extract items and total. Returns (data, error_message)."""
+def ocr_ticket_via_gemini(image_path: Path, cart_items: list, supermarket: str) -> tuple[dict | None, str | None]:
+    """Uses Gemini 1.5/2.0/2.5 Flash to extract items and total. Returns (data, error_message)."""
     key = get_gemini_key()
     if not key:
         return None, "No se detectó GEMINI_API_KEY ni GOOGLE_API_KEY en variables de entorno."
@@ -460,13 +529,28 @@ def ocr_ticket_via_gemini(image_path: Path) -> tuple[dict | None, str | None]:
         genai.configure(api_key=key)
         img = Image.open(image_path)
         
+        # Build cart items context to help the model match abbreviations
+        import re
+        cart_context = ""
+        if cart_items:
+            cart_context = "Lista de productos esperados (en el carrito virtual del usuario):\n"
+            for item in cart_items:
+                name = item.get("clean_name") or item.get("name") or ""
+                # Strip leading non-alphanumeric (like emojis)
+                name_clean = re.sub(r'^[^\w\s]+', '', name).strip()
+                cart_context += f"- {name_clean} (€{item.get('price', 0.0)})\n"
+        
         prompt = (
-            "Analiza esta imagen de un ticket/preticket de compra de supermercado. "
-            "Extrae el precio total de la compra y la lista de artículos con sus nombres y precios individuales. "
+            f"Analiza esta imagen de un ticket/preticket de compra del supermercado '{supermarket}'.\n"
+            "Extrae el precio total de la compra y la lista de artículos con sus nombres crudos tal y como aparecen en el ticket físico "
+            "(ej. con sus abreviaciones de ticket como 'LECH SEMI HAC' o 'LLEN CUI ESSEN') y sus precios individuales.\n"
+            "Dado que las líneas de ticket suelen estar muy abreviadas, utiliza la siguiente lista de productos esperados en el carrito del usuario como contexto "
+            "para interpretar correctamente lo que pone en el ticket físico:\n\n"
+            f"{cart_context}\n"
             "Devuelve EXCLUSIVAMENTE un objeto JSON válido con el siguiente formato, "
-            "sin usar bloques de código de markdown (no agregues ```json ni ```, solo el JSON plano): "
-            '{"total": 12.45, "items": [{"name": "Leche entera Hacendado", "price": 0.89}, ...]} '
-            "Si la imagen no es legible o no es un ticket, responde con: "
+            "sin usar bloques de código de markdown (no agregues ```json ni ```, solo el JSON plano):\n"
+            '{"total": 12.45, "items": [{"name": "Nombre crudo del ticket", "price": 0.89}, ...]}\n'
+            "Si la imagen no es legible o no es un ticket, responde con:\n"
             '{"total": 0.0, "items": []}'
         )
         
@@ -526,7 +610,7 @@ async def upload_ticket(
         parsed_cart_items = []
 
     # 2. Try Gemini OCR
-    ticket_data, debug_error = ocr_ticket_via_gemini(file_path)
+    ticket_data, debug_error = ocr_ticket_via_gemini(file_path, parsed_cart_items, supermarket)
     
     using_fallback = False
     if not ticket_data:
@@ -537,14 +621,27 @@ async def upload_ticket(
             "items": [{"name": item["name"], "price": item["price"]} for item in parsed_cart_items]
         }
 
-    # 3. Validate
+    # 3. Validate (pass get_ticket_mapping and supermarket)
     validator = TicketValidator()
-    report = validator.validate(parsed_cart_items, cart_total, ticket_data)
+    report = validator.validate(
+        cart_items=parsed_cart_items,
+        cart_total=cart_total,
+        ticket_data=ticket_data,
+        get_mapping_func=get_ticket_mapping,
+        supermarket=supermarket
+    )
     report["using_fallback"] = using_fallback
     report["debug_error"] = debug_error
 
-    # 4. Save to FSE+ Audit Logs if validated successfully
+    # 4. Save learned mappings if validated successfully
     if report["status"] == "validated":
+        for mapping in report.get("learned_mappings", []):
+            save_ticket_mapping(
+                supermarket=mapping["supermarket"],
+                raw_ticket_name=mapping["raw_name"],
+                barcode=mapping["barcode"]
+            )
+
         audit_record = {
             "transaction_id": str(uuid.uuid4()),
             "user_id": "USR-99X",
