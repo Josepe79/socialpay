@@ -207,10 +207,20 @@ SEED_CATALOG = [
 
 def init_db():
     """Crea las tablas y carga el catálogo semilla si la BBDD está vacía."""
-    if not DATABASE_URL:
-        print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria")
-        return
     try:
+        # Comprobar desalineación del esquema en la tabla 'usuarios' para auto-sanación
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        if "usuarios" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("usuarios")]
+            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled"]
+            missing = [col for col in required if col not in columns]
+            if missing:
+                print(f"[DB] Columnas faltantes en 'usuarios': {missing}. Recreando tablas para actualizar esquema...")
+                # Eliminar todas las tablas administradas por SQLAlchemy
+                Base.metadata.drop_all(bind=engine)
+                print("[DB] Tablas antiguas eliminadas con éxito.")
+
         # Crear tablas SQLAlchemy (Usuario, ProductoSupermercado, AuditoriaTransaccion)
         print("[DB] Inicializando tablas SQLAlchemy...")
         Base.metadata.create_all(bind=engine)
@@ -248,6 +258,9 @@ def init_db():
     except Exception as e:
         print(f"[DB] Error al sembrar administrador admin@jepco.es: {e}")
 
+    if not DATABASE_URL:
+        print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria para productos")
+        return
         
     try:
         conn = get_conn()
@@ -990,34 +1003,43 @@ async def process_login(
     password: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Buscar el usuario admin
-    user = db.query(UserModel).filter(UserModel.email == email.strip()).first()
-    if not user or user.rol != "admin":
-        return RedirectResponse(
-            url="/admin/login?error=" + urllib.parse.quote("Credenciales incorrectas o acceso no autorizado."),
-            status_code=303
-        )
-    
-    # Validar contraseña hashed mediante PBKDF2
-    if not verify_password(password, user.hashed_password):
-        return RedirectResponse(
-            url="/admin/login?error=" + urllib.parse.quote("Contraseña incorrecta."),
-            status_code=303
-        )
+    try:
+        # Buscar el usuario admin
+        user = db.query(UserModel).filter(UserModel.email == email.strip()).first()
+        if not user or user.rol != "admin":
+            return RedirectResponse(
+                url="/admin/login?error=" + urllib.parse.quote("Credenciales incorrectas o acceso no autorizado."),
+                status_code=303
+            )
         
-    # Crear sesión temporal (mfa_verified = False)
-    session_token = secrets.token_hex(32)
-    ADMIN_SESSIONS[session_token] = {
-        "user_id": user.id,
-        "mfa_verified": False,
-        "expires": datetime.now() + timedelta(minutes=5)
-    }
-    
-    # Redirigir a setup si el QR no ha sido escaneado aún, de lo contrario a verificación
-    next_url = "/admin/setup-mfa" if not user.mfa_enabled else "/admin/verify-mfa"
-    response = RedirectResponse(url=next_url, status_code=303)
-    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False)
-    return response
+        # Validar contraseña hashed mediante PBKDF2
+        if not verify_password(password, user.hashed_password):
+            return RedirectResponse(
+                url="/admin/login?error=" + urllib.parse.quote("Contraseña incorrecta."),
+                status_code=303
+            )
+            
+        # Crear sesión temporal (mfa_verified = False)
+        session_token = secrets.token_hex(32)
+        ADMIN_SESSIONS[session_token] = {
+            "user_id": user.id,
+            "mfa_verified": False,
+            "expires": datetime.now() + timedelta(minutes=5)
+        }
+        
+        # Redirigir a setup si el QR no ha sido escaneado aún, de lo contrario a verificación
+        next_url = "/admin/setup-mfa" if not user.mfa_enabled else "/admin/verify-mfa"
+        response = RedirectResponse(url=next_url, status_code=303)
+        response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False)
+        return response
+    except Exception as e:
+        print(f"[AUTH ERROR] Error in process_login: {e}")
+        import traceback
+        traceback.print_exc()
+        return RedirectResponse(
+            url="/admin/login?error=" + urllib.parse.quote(f"Error interno del servidor: {str(e)}"),
+            status_code=303
+        )
 
 @app.get("/admin/setup-mfa", response_class=HTMLResponse)
 async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
@@ -1056,28 +1078,37 @@ async def process_setup_mfa(
     code: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    session_token = request.cookies.get("session_token")
-    if not session_token or session_token not in ADMIN_SESSIONS:
-        return RedirectResponse(url="/admin/login", status_code=303)
-        
-    sess = ADMIN_SESSIONS[session_token]
-    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
-    if not user or user.mfa_enabled:
-        return RedirectResponse(url="/admin/login", status_code=303)
-        
-    # Validar código TOTP de 6 dígitos ingresado por el usuario
-    totp = pyotp.TOTP(user.mfa_secret)
-    if totp.verify(code.strip()):
-        user.mfa_enabled = True
-        db.commit()
-        
-        # Validar la sesión
-        sess["mfa_verified"] = True
-        sess["expires"] = datetime.now() + timedelta(hours=2)
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
-    else:
+    try:
+        session_token = request.cookies.get("session_token")
+        if not session_token or session_token not in ADMIN_SESSIONS:
+            return RedirectResponse(url="/admin/login", status_code=303)
+            
+        sess = ADMIN_SESSIONS[session_token]
+        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+        if not user or user.mfa_enabled:
+            return RedirectResponse(url="/admin/login", status_code=303)
+            
+        # Validar código TOTP de 6 dígitos ingresado por el usuario
+        totp = pyotp.TOTP(user.mfa_secret)
+        if totp.verify(code.strip()):
+            user.mfa_enabled = True
+            db.commit()
+            
+            # Validar la sesión
+            sess["mfa_verified"] = True
+            sess["expires"] = datetime.now() + timedelta(hours=2)
+            return RedirectResponse(url="/admin/dashboard", status_code=303)
+        else:
+            return RedirectResponse(
+                url="/admin/setup-mfa?error=" + urllib.parse.quote("Código MFA inválido. Reintenta."),
+                status_code=303
+            )
+    except Exception as e:
+        print(f"[AUTH ERROR] Error in process_setup_mfa: {e}")
+        import traceback
+        traceback.print_exc()
         return RedirectResponse(
-            url="/admin/setup-mfa?error=" + urllib.parse.quote("Código MFA inválido. Reintenta."),
+            url="/admin/login?error=" + urllib.parse.quote(f"Error interno del servidor: {str(e)}"),
             status_code=303
         )
 
@@ -1103,23 +1134,32 @@ async def process_verify_mfa(
     code: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    session_token = request.cookies.get("session_token")
-    if not session_token or session_token not in ADMIN_SESSIONS:
-        return RedirectResponse(url="/admin/login", status_code=303)
-        
-    sess = ADMIN_SESSIONS[session_token]
-    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
-    if not user:
-        return RedirectResponse(url="/admin/login", status_code=303)
-        
-    totp = pyotp.TOTP(user.mfa_secret)
-    if totp.verify(code.strip()):
-        sess["mfa_verified"] = True
-        sess["expires"] = datetime.now() + timedelta(hours=2)
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
-    else:
+    try:
+        session_token = request.cookies.get("session_token")
+        if not session_token or session_token not in ADMIN_SESSIONS:
+            return RedirectResponse(url="/admin/login", status_code=303)
+            
+        sess = ADMIN_SESSIONS[session_token]
+        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+        if not user:
+            return RedirectResponse(url="/admin/login", status_code=303)
+            
+        totp = pyotp.TOTP(user.mfa_secret)
+        if totp.verify(code.strip()):
+            sess["mfa_verified"] = True
+            sess["expires"] = datetime.now() + timedelta(hours=2)
+            return RedirectResponse(url="/admin/dashboard", status_code=303)
+        else:
+            return RedirectResponse(
+                url="/admin/verify-mfa?error=" + urllib.parse.quote("Código MFA incorrecto."),
+                status_code=303
+            )
+    except Exception as e:
+        print(f"[AUTH ERROR] Error in process_verify_mfa: {e}")
+        import traceback
+        traceback.print_exc()
         return RedirectResponse(
-            url="/admin/verify-mfa?error=" + urllib.parse.quote("Código MFA incorrecto."),
+            url="/admin/login?error=" + urllib.parse.quote(f"Error interno del servidor: {str(e)}"),
             status_code=303
         )
 
