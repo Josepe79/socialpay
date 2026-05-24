@@ -484,14 +484,52 @@
                     <span>Dar de Alta Gestor Social</span>
                 </div>
                 <form id="create-gestor-form">
+                    <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">1. DATOS INSTITUCIONALES</div>
                     <div class="form-group">
-                        <label for="gestor_email">Correo Electrónico del Gestor</label>
-                        <input type="email" id="gestor_email" name="email" placeholder="Ej: gestor@ong.org" required>
+                        <label for="gestor_nombre">Nombre de la Institución</label>
+                        <input type="text" id="gestor_nombre" placeholder="Ej: Ayuntamiento de Barcelona" required>
                     </div>
                     <div class="form-group">
-                        <label for="gestor_password">Contraseña de Acceso</label>
-                        <input type="password" id="gestor_password" name="password" placeholder="Mínimo 8 caracteres" required>
+                        <label for="gestor_cif">CIF (Formato Español)</label>
+                        <input type="text" id="gestor_cif" placeholder="Ej: P0801900B" required>
                     </div>
+                    <div class="form-group">
+                        <label for="gestor_direccion">Dirección Física</label>
+                        <input type="text" id="gestor_direccion" placeholder="Ej: Plaza Sant Jaume, 1" required>
+                    </div>
+
+                    <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-top:16px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">2. VINCULACIÓN DE FONDOS FSE+</div>
+                    <div class="form-group">
+                        <label for="gestor_proyecto_fse">Código Proyecto FSE+</label>
+                        <input type="text" id="gestor_proyecto_fse" placeholder="Ej: FSE-CAT-2026" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gestor_presupuesto">Presupuesto Inicial (€)</label>
+                        <input type="number" step="0.01" min="0.01" id="gestor_presupuesto" placeholder="Ej: 25000.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gestor_tasa">Tasa de Cofinanciación (0.00 - 1.00)</label>
+                        <input type="number" step="0.01" min="0" max="1" id="gestor_tasa" placeholder="Ej: 0.70" required>
+                    </div>
+
+                    <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-top:16px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">3. CREDENCIALES DE ACCESO</div>
+                    <div class="form-group">
+                        <label for="gestor_responsable">Responsable de Cuenta</label>
+                        <input type="text" id="gestor_responsable" placeholder="Ej: Ana Gómez López" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gestor_email">Email Institucional</label>
+                        <input type="email" id="gestor_email" placeholder="Ej: responsable@ayto.es" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gestor_password">Contraseña Temporal</label>
+                        <input type="password" id="gestor_password" placeholder="Mínimo 8 caracteres" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gestor_movil">Teléfono Móvil (MFA)</label>
+                        <input type="text" id="gestor_movil" placeholder="Ej: +34600123456" required>
+                    </div>
+
                     <button type="submit" class="btn-submit">Crear Cuenta de Gestor</button>
                 </form>
             </div>
@@ -707,9 +745,44 @@
     // Submit gestor creation
     document.getElementById('create-gestor-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        const cif = document.getElementById('gestor_cif').value.replace(/[\s\-]/g, '').toUpperCase();
+        const cifRegex = /^[A-HJNP-SU-W]\d{7}[0-9A-J]$/;
+        if (!cifRegex.test(cif)) {
+            showToast('El CIF ingresado no cumple con el formato estándar español (ej: A1234567B).', 'error');
+            return;
+        }
+
+        const email = document.getElementById('gestor_email').value.trim();
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!emailRegex.test(email)) {
+            showToast('Por favor introduce un correo electrónico válido.', 'error');
+            return;
+        }
+
+        const budget = parseFloat(document.getElementById('gestor_presupuesto').value);
+        if (isNaN(budget) || budget <= 0) {
+            showToast('El presupuesto inicial debe ser un número positivo.', 'error');
+            return;
+        }
+
+        const tasa = parseFloat(document.getElementById('gestor_tasa').value);
+        if (isNaN(tasa) || tasa < 0 || tasa > 1) {
+            showToast('La tasa de cofinanciación debe estar entre 0.00 y 1.00.', 'error');
+            return;
+        }
+
         const payload = {
-            email: document.getElementById('gestor_email').value,
-            password: document.getElementById('gestor_password').value
+            nombre_institucion: document.getElementById('gestor_nombre').value.trim(),
+            cif: cif,
+            direccion: document.getElementById('gestor_direccion').value.trim(),
+            codigo_proyecto_fse: document.getElementById('gestor_proyecto_fse').value.trim(),
+            presupuesto_inicial: budget,
+            tasa_cofinanciacion: tasa,
+            responsable: document.getElementById('gestor_responsable').value.trim(),
+            email: email,
+            password: document.getElementById('gestor_password').value,
+            movil_mfa: document.getElementById('gestor_movil').value.trim()
         };
 
         try {
@@ -720,7 +793,7 @@
             });
             const data = await res.json();
             if (res.status === 200 || res.status === 201) {
-                showToast(`Gestor ${payload.email} creado con éxito.`, 'success');
+                showToast(`Gestor ${payload.email} creado con éxito y fondos vinculados.`, 'success');
                 document.getElementById('create-gestor-form').reset();
                 loadDashboardData();
             } else {

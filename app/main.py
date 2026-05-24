@@ -261,7 +261,7 @@ def init_db():
         recreate_needed = False
         if has_table_users:
             columns = [c["name"] for c in inspector.get_columns("usuarios")]
-            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled", "gestor_uuid", "codigo_proyecto_fse", "creado_por"]
+            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled", "gestor_uuid", "codigo_proyecto_fse", "creado_por", "nombre_institucion", "cif", "direccion", "responsable", "movil_mfa"]
             missing = [col for col in required if col not in columns]
             if missing:
                 print(f"[DB] Columnas faltantes en 'usuarios': {missing}.")
@@ -1282,8 +1282,16 @@ class AsignarFondosSchema(BaseModel):
     tasa_cofinanciacion: float
 
 class GestorCreateSchema(BaseModel):
+    nombre_institucion: str
+    cif: str
+    direccion: str
+    codigo_proyecto_fse: str
+    presupuesto_inicial: float
+    tasa_cofinanciacion: float
+    responsable: str
     email: str
     password: str
+    movil_mfa: str
 
 # 1. Endpoints de Beneficiarios (CRUD)
 
@@ -1874,39 +1882,113 @@ async def crear_gestor(
     if not current_user:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
         
-    email_val = item.email.strip()
-    password_val = item.password.strip()
+    from app.database import SessionLocal
+    from decimal import Decimal
+    import re
     
-    if not email_val or not password_val:
-        return JSONResponse(status_code=400, content={"error": "Todos los campos son obligatorios."})
+    # Validaciones de entrada
+    nombre_val = item.nombre_institucion.strip()
+    cif_val = re.sub(r'[\s\-]', '', item.cif).upper()
+    direccion_val = item.direccion.strip()
+    codigo_proyecto_val = item.codigo_proyecto_fse.strip()
+    presupuesto_val = item.presupuesto_inicial
+    tasa_val = item.tasa_cofinanciacion
+    responsable_val = item.responsable.strip()
+    email_val = item.email.strip().lower()
+    password_val = item.password.strip()
+    movil_val = item.movil_mfa.strip()
+    
+    if not all([nombre_val, cif_val, direccion_val, codigo_proyecto_val, responsable_val, email_val, password_val, movil_val]):
+        return JSONResponse(status_code=400, content={"error": "Todos los campos del formulario son obligatorios."})
         
+    if not re.match(r'^[A-HJNP-SU-W]\d{7}[0-9A-J]$', cif_val):
+        return JSONResponse(status_code=400, content={"error": "El CIF proporcionado no cumple con el formato estándar español (ej: A1234567B)."})
+        
+    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email_val):
+        return JSONResponse(status_code=400, content={"error": "El email institucional no tiene un formato válido."})
+        
+    if presupuesto_val <= 0:
+        return JSONResponse(status_code=400, content={"error": "El presupuesto inicial debe ser un número positivo."})
+        
+    if not (0 <= tasa_val <= 1):
+        return JSONResponse(status_code=400, content={"error": "La tasa de cofinanciación debe estar entre 0.00 y 1.00 (ej: 0.70 para el 70%)."})
+        
+    # Comprobar si existe usuario con ese correo
     existing = db.query(UserModel).filter(UserModel.email == email_val).first()
     if existing:
-        return JSONResponse(status_code=400, content={"error": "Este correo electrónico ya está registrado."})
+        return JSONResponse(status_code=400, content={"error": "Este correo electrónico institucional ya está registrado."})
         
-    # Crear gestor con auditoria obligatoria FSE+ (creado_por y timestamp)
-    new_gestor = UserModel(
-        token_anonimo=f"GESTOR-TOKEN-{secrets.token_hex(4).upper()}",
-        email=email_val,
-        hashed_password=hash_password(password_val),
-        rol="gestor",
-        mfa_secret=pyotp.random_base32(),
-        mfa_enabled=False,
-        creado_por=current_user.id,
-        created_at=datetime.utcnow()
+    # Crear de forma transaccional el Gestor y su Asignación de Presupuesto Inicial
+    tx_session = SessionLocal()
+    new_gestor_id = None
+    created_at_time = datetime.utcnow()
+    try:
+        with tx_session.begin():
+            new_gestor = UserModel(
+                token_anonimo=f"GESTOR-TOKEN-{secrets.token_hex(4).upper()}",
+                email=email_val,
+                hashed_password=hash_password(password_val),
+                rol="gestor",
+                mfa_secret=pyotp.random_base32(),
+                mfa_enabled=False,
+                creado_por=current_user.id,
+                nombre_institucion=nombre_val,
+                cif=cif_val,
+                direccion=direccion_val,
+                responsable=responsable_val,
+                movil_mfa=movil_val,
+                created_at=created_at_time
+            )
+            tx_session.add(new_gestor)
+            tx_session.flush() # Para obtener el new_gestor.id
+            new_gestor_id = new_gestor.id
+            
+            # Crear asignacion de fondos FSE+ inicial para este gestor
+            new_alloc = AFGModel(
+                gestor_id=new_gestor.id,
+                codigo_proyecto_fse=codigo_proyecto_val,
+                presupuesto_total=Decimal(str(presupuesto_val)),
+                presupuesto_consumido=Decimal("0.00"),
+                tasa_cofinanciacion=Decimal(str(tasa_val)),
+                created_at=created_at_time
+            )
+            tx_session.add(new_alloc)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"error": f"Error al persistir el perfil del gestor: {str(e)}"})
+    finally:
+        tx_session.close()
+        
+    # Registrar de forma inmutable en el log de auditoría
+    security_logger.warning(
+        f"[COMPLIANCE FSE+] Gestor Social creado con éxito. Creador (Up Spain ID): {current_user.id}, Gestor ID: {new_gestor_id}, CIF: {cif_val}, Proyecto FSE: {codigo_proyecto_val}, Presupuesto: €{presupuesto_val}"
     )
-    db.add(new_gestor)
-    db.commit()
-    db.refresh(new_gestor)
+    
+    audit_record = {
+        "event": "CREATE_GESTOR_AUDIT",
+        "timestamp": created_at_time.isoformat(),
+        "created_by_upspain_id": str(current_user.id),
+        "gestor_id": str(new_gestor_id),
+        "nombre_institucion": nombre_val,
+        "cif": cif_val,
+        "proyecto_fse": codigo_proyecto_val,
+        "presupuesto_inicial": presupuesto_val,
+        "tasa_cofinanciacion": tasa_val
+    }
+    db_auditoria.append(audit_record)
     
     return {
         "status": "created",
         "gestor": {
-            "id": str(new_gestor.id),
-            "email": new_gestor.email,
-            "rol": new_gestor.rol,
-            "creado_por": str(new_gestor.creado_por),
-            "created_at": new_gestor.created_at.isoformat()
+            "id": str(new_gestor_id),
+            "email": email_val,
+            "nombre_institucion": nombre_val,
+            "cif": cif_val,
+            "codigo_proyecto_fse": codigo_proyecto_val,
+            "presupuesto_inicial": presupuesto_val,
+            "creado_por": str(current_user.id),
+            "created_at": created_at_time.isoformat()
         }
     }
 

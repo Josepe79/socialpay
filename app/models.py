@@ -69,6 +69,13 @@ class Usuario(Base):
     codigo_proyecto_fse = Column(String, nullable=True) # Proyecto FSE asignado para beneficiarios
     creado_por = Column(GUID(), ForeignKey('usuarios.id', ondelete='SET NULL'), nullable=True)
     
+    # Datos institucionales e información del gestor social
+    nombre_institucion = Column(String, nullable=True)
+    cif = Column(String, nullable=True)
+    direccion = Column(String, nullable=True)
+    responsable = Column(String, nullable=True)
+    movil_mfa = Column(String, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class AsignacionFondosGestor(Base):
