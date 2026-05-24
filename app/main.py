@@ -23,7 +23,7 @@ from logic.validator import TicketValidator
 
 from sqlalchemy.orm import Session
 from app.database import get_db, engine
-from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel
+from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel, AsignacionFondosGestor as AFGModel
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -51,8 +51,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
     salt, _ = hashed_password.split(":", 1)
     return hash_password(password, salt) == hashed_password
 
-async def get_current_admin(request: Request, db: Session = Depends(get_db)):
-    """Dependency para verificar sesión administrativa y MFA activado."""
+async def get_current_user_by_roles(request: Request, allowed_roles: List[str], db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
     if not session_token or session_token not in ADMIN_SESSIONS:
         return None
@@ -66,10 +65,25 @@ async def get_current_admin(request: Request, db: Session = Depends(get_db)):
         return None
         
     user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
-    if not user or user.rol != "admin":
+    if not user or user.rol not in allowed_roles:
         return None
         
     return user
+
+async def get_current_admin(request: Request, db: Session = Depends(get_db)):
+    return await get_current_user_by_roles(request, ["admin"], db)
+
+async def get_current_upspain(request: Request, db: Session = Depends(get_db)):
+    return await get_current_user_by_roles(request, ["upspain"], db)
+
+async def get_current_gestor(request: Request, db: Session = Depends(get_db)):
+    return await get_current_user_by_roles(request, ["gestor"], db)
+
+async def get_current_supermercado(request: Request, db: Session = Depends(get_db)):
+    return await get_current_user_by_roles(request, ["supermercado"], db)
+
+async def get_current_staff(request: Request, db: Session = Depends(get_db)):
+    return await get_current_user_by_roles(request, ["admin", "upspain", "gestor", "supermercado"], db)
 
 app = FastAPI(title="SocialPay MVP")
 
@@ -211,17 +225,29 @@ def init_db():
         # Comprobar desalineación del esquema en la tabla 'usuarios' para auto-sanación
         from sqlalchemy import inspect
         inspector = inspect(engine)
-        if "usuarios" in inspector.get_table_names():
+        
+        has_table_users = "usuarios" in inspector.get_table_names()
+        has_table_allocation = "asignacion_fondos_gestor" in inspector.get_table_names()
+        
+        recreate_needed = False
+        if has_table_users:
             columns = [c["name"] for c in inspector.get_columns("usuarios")]
-            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled"]
+            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled", "gestor_uuid", "codigo_proyecto_fse"]
             missing = [col for col in required if col not in columns]
             if missing:
-                print(f"[DB] Columnas faltantes en 'usuarios': {missing}. Recreando tablas para actualizar esquema...")
-                # Eliminar todas las tablas administradas por SQLAlchemy
-                Base.metadata.drop_all(bind=engine)
-                print("[DB] Tablas antiguas eliminadas con éxito.")
+                print(f"[DB] Columnas faltantes en 'usuarios': {missing}.")
+                recreate_needed = True
+        
+        if not has_table_allocation:
+            print("[DB] Tabla 'asignacion_fondos_gestor' no existe.")
+            recreate_needed = True
+            
+        if recreate_needed:
+            print("[DB] Recreando tablas para actualizar esquema...")
+            Base.metadata.drop_all(bind=engine)
+            print("[DB] Tablas antiguas eliminadas con éxito.")
 
-        # Crear tablas SQLAlchemy (Usuario, ProductoSupermercado, AuditoriaTransaccion)
+        # Crear tablas SQLAlchemy (Usuario, ProductoSupermercado, AuditoriaTransaccion, AsignacionFondosGestor)
         print("[DB] Inicializando tablas SQLAlchemy...")
         Base.metadata.create_all(bind=engine)
         print("[DB] Tablas SQLAlchemy inicializadas.")
@@ -1083,6 +1109,8 @@ async def get_audit_logs():
 class BeneficiarySchema(BaseModel):
     token_anonimo: str
     saldo_disponible: float
+    codigo_proyecto_fse: Optional[str] = None
+    gestor_uuid: Optional[str] = None
 
 class SystemUserCreateSchema(BaseModel):
     email: str
@@ -1094,6 +1122,12 @@ class SystemUserUpdateSchema(BaseModel):
     password: Optional[str] = None
     rol: str
 
+class AsignarFondosSchema(BaseModel):
+    gestor_id: str
+    codigo_proyecto_fse: str
+    presupuesto_total: float
+    tasa_cofinanciacion: float
+
 # 1. Endpoints de Beneficiarios (CRUD)
 
 @app.get("/api/admin/beneficiaries")
@@ -1101,16 +1135,26 @@ async def list_beneficiaries(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    admin = await get_current_admin(request, db)
-    if not admin:
+    user = await get_current_user_by_roles(request, ["admin", "gestor"], db)
+    if not user:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
-    beneficiaries = db.query(UserModel).filter(UserModel.rol == "beneficiario").order_by(UserModel.created_at.desc()).all()
+        
+    if user.rol == "gestor":
+        beneficiaries = db.query(UserModel).filter(
+            UserModel.rol == "beneficiario",
+            UserModel.gestor_uuid == user.id
+        ).order_by(UserModel.created_at.desc()).all()
+    else:
+        beneficiaries = db.query(UserModel).filter(UserModel.rol == "beneficiario").order_by(UserModel.created_at.desc()).all()
+        
     return {
         "beneficiaries": [
             {
                 "id": str(b.id),
                 "token_anonimo": b.token_anonimo,
-                "saldo_disponible": float(b.saldo_disponible)
+                "saldo_disponible": float(b.saldo_disponible),
+                "gestor_uuid": str(b.gestor_uuid) if b.gestor_uuid else None,
+                "codigo_proyecto_fse": b.codigo_proyecto_fse
             } for b in beneficiaries
         ]
     }
@@ -1121,8 +1165,8 @@ async def create_beneficiary(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    admin = await get_current_admin(request, db)
-    if not admin:
+    current_user = await get_current_user_by_roles(request, ["admin", "gestor"], db)
+    if not current_user:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
         
     token_val = item.token_anonimo.strip()
@@ -1133,21 +1177,77 @@ async def create_beneficiary(
     if existing:
         return JSONResponse(status_code=400, content={"error": "Este token de beneficiario ya existe."})
         
-    new_user = UserModel(
-        token_anonimo=token_val,
-        saldo_disponible=item.saldo_disponible,
-        rol="beneficiario"
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    gestor_id = None
+    codigo_proyecto_fse = item.codigo_proyecto_fse
     
+    if current_user.rol == "gestor":
+        gestor_id = current_user.id
+        if not codigo_proyecto_fse:
+            return JSONResponse(status_code=400, content={"error": "El código de proyecto FSE es obligatorio para el gestor."})
+    else:
+        if item.gestor_uuid:
+            gestor_id = uuid.UUID(item.gestor_uuid) if isinstance(item.gestor_uuid, str) else item.gestor_uuid
+            
+    # Executing the transaction explicitly using a new session block for clean context manager transaction
+    from app.database import SessionLocal
+    from decimal import Decimal
+    tx_session = SessionLocal()
+    try:
+        with tx_session.begin():
+            if gestor_id and codigo_proyecto_fse:
+                # Lock row with pessimistic lock
+                allocation = tx_session.query(AFGModel).filter(
+                    AFGModel.gestor_id == gestor_id,
+                    AFGModel.codigo_proyecto_fse == codigo_proyecto_fse
+                ).with_for_update().first()
+                
+                if not allocation:
+                    raise ValueError("Límite de presupuesto excedido")
+                
+                from sqlalchemy import func
+                total_existing_saldos = tx_session.query(func.sum(UserModel.saldo_disponible)).filter(
+                    UserModel.gestor_uuid == gestor_id,
+                    UserModel.codigo_proyecto_fse == codigo_proyecto_fse,
+                    UserModel.rol == "beneficiario"
+                ).scalar() or Decimal("0.00")
+                
+                new_total = total_existing_saldos + Decimal(str(item.saldo_disponible))
+                if new_total > allocation.presupuesto_total:
+                    raise ValueError("Límite de presupuesto excedido")
+                
+                allocation.presupuesto_consumido = new_total
+                
+            new_user = UserModel(
+                token_anonimo=token_val,
+                saldo_disponible=Decimal(str(item.saldo_disponible)),
+                rol="beneficiario",
+                gestor_uuid=gestor_id,
+                codigo_proyecto_fse=codigo_proyecto_fse
+            )
+            tx_session.add(new_user)
+    except ValueError as ve:
+        if str(ve) == "Límite de presupuesto excedido":
+            return JSONResponse(status_code=400, content={"error": "Límite de presupuesto excedido"})
+        return JSONResponse(status_code=400, content={"error": str(ve)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if "check_presupuesto_consumido_limit" in str(e):
+            return JSONResponse(status_code=400, content={"error": "Límite de presupuesto excedido"})
+        return JSONResponse(status_code=400, content={"error": f"Error en la base de datos: {str(e)}"})
+    finally:
+        tx_session.close()
+        
+    # Get user to return
+    new_user_db = db.query(UserModel).filter(UserModel.token_anonimo == token_val).first()
     return {
         "status": "created",
         "beneficiary": {
-            "id": str(new_user.id),
-            "token_anonimo": new_user.token_anonimo,
-            "saldo_disponible": float(new_user.saldo_disponible)
+            "id": str(new_user_db.id),
+            "token_anonimo": new_user_db.token_anonimo,
+            "saldo_disponible": float(new_user_db.saldo_disponible),
+            "gestor_uuid": str(new_user_db.gestor_uuid) if new_user_db.gestor_uuid else None,
+            "codigo_proyecto_fse": new_user_db.codigo_proyecto_fse
         }
     }
 
@@ -1158,8 +1258,8 @@ async def update_beneficiary(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    admin = await get_current_admin(request, db)
-    if not admin:
+    current_user = await get_current_user_by_roles(request, ["admin", "gestor"], db)
+    if not current_user:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
         
     user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
@@ -1174,17 +1274,73 @@ async def update_beneficiary(
     if existing:
         return JSONResponse(status_code=400, content={"error": "Este token de beneficiario ya está en uso."})
         
-    user.token_anonimo = token_val
-    user.saldo_disponible = item.saldo_disponible
-    db.commit()
-    db.refresh(user)
+    gestor_id = user.gestor_uuid
+    codigo_proyecto_fse = item.codigo_proyecto_fse
     
+    if current_user.rol == "gestor":
+        gestor_id = current_user.id
+        if not codigo_proyecto_fse:
+            return JSONResponse(status_code=400, content={"error": "El código de proyecto FSE es obligatorio para el gestor."})
+    else:
+        if item.gestor_uuid:
+            gestor_id = uuid.UUID(item.gestor_uuid) if isinstance(item.gestor_uuid, str) else item.gestor_uuid
+            
+    from app.database import SessionLocal
+    from decimal import Decimal
+    tx_session = SessionLocal()
+    try:
+        with tx_session.begin():
+            if gestor_id and codigo_proyecto_fse:
+                # Lock row with pessimistic lock
+                allocation = tx_session.query(AFGModel).filter(
+                    AFGModel.gestor_id == gestor_id,
+                    AFGModel.codigo_proyecto_fse == codigo_proyecto_fse
+                ).with_for_update().first()
+                
+                if not allocation:
+                    raise ValueError("Límite de presupuesto excedido")
+                
+                from sqlalchemy import func
+                total_existing_saldos = tx_session.query(func.sum(UserModel.saldo_disponible)).filter(
+                    UserModel.gestor_uuid == gestor_id,
+                    UserModel.codigo_proyecto_fse == codigo_proyecto_fse,
+                    UserModel.rol == "beneficiario",
+                    UserModel.id != user.id
+                ).scalar() or Decimal("0.00")
+                
+                new_total = total_existing_saldos + Decimal(str(item.saldo_disponible))
+                if new_total > allocation.presupuesto_total:
+                    raise ValueError("Límite de presupuesto excedido")
+                
+                allocation.presupuesto_consumido = new_total
+                
+            tx_user = tx_session.query(UserModel).filter(UserModel.id == user.id).first()
+            tx_user.token_anonimo = token_val
+            tx_user.saldo_disponible = Decimal(str(item.saldo_disponible))
+            tx_user.gestor_uuid = gestor_id
+            tx_user.codigo_proyecto_fse = codigo_proyecto_fse
+    except ValueError as ve:
+        if str(ve) == "Límite de presupuesto excedido":
+            return JSONResponse(status_code=400, content={"error": "Límite de presupuesto excedido"})
+        return JSONResponse(status_code=400, content={"error": str(ve)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if "check_presupuesto_consumido_limit" in str(e):
+            return JSONResponse(status_code=400, content={"error": "Límite de presupuesto excedido"})
+        return JSONResponse(status_code=400, content={"error": f"Error en la base de datos: {str(e)}"})
+    finally:
+        tx_session.close()
+        
+    db.refresh(user)
     return {
         "status": "updated",
         "beneficiary": {
             "id": str(user.id),
             "token_anonimo": user.token_anonimo,
-            "saldo_disponible": float(user.saldo_disponible)
+            "saldo_disponible": float(user.saldo_disponible),
+            "gestor_uuid": str(user.gestor_uuid) if user.gestor_uuid else None,
+            "codigo_proyecto_fse": user.codigo_proyecto_fse
         }
     }
 
@@ -1194,16 +1350,48 @@ async def delete_beneficiary(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    admin = await get_current_admin(request, db)
-    if not admin:
+    current_user = await get_current_user_by_roles(request, ["admin", "gestor"], db)
+    if not current_user:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
         
-    user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
-    if not user:
-        return JSONResponse(status_code=404, content={"error": "Beneficiario no encontrado."})
+    if current_user.rol == "gestor":
+        user = db.query(UserModel).filter(
+            UserModel.id == user_id,
+            UserModel.rol == "beneficiario",
+            UserModel.gestor_uuid == current_user.id
+        ).first()
+    else:
+        user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
         
-    db.delete(user)
-    db.commit()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Beneficiario no encontrado o no pertenece a este gestor."})
+        
+    # Restituir el presupuesto consumido al eliminar el beneficiario
+    gestor_id = user.gestor_uuid
+    codigo_proyecto_fse = user.codigo_proyecto_fse
+    saldo_disponible = user.saldo_disponible
+    
+    from app.database import SessionLocal
+    from decimal import Decimal
+    tx_session = SessionLocal()
+    try:
+        with tx_session.begin():
+            if gestor_id and codigo_proyecto_fse:
+                allocation = tx_session.query(AFGModel).filter(
+                    AFGModel.gestor_id == gestor_id,
+                    AFGModel.codigo_proyecto_fse == codigo_proyecto_fse
+                ).with_for_update().first()
+                if allocation:
+                    allocation.presupuesto_consumido = max(Decimal("0.00"), allocation.presupuesto_consumido - saldo_disponible)
+            tx_user = tx_session.query(UserModel).filter(UserModel.id == user.id).first()
+            tx_session.delete(tx_user)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=400, content={"error": f"Error al eliminar beneficiario: {str(e)}"})
+    finally:
+        tx_session.close()
+        
     return {"status": "deleted"}
 
 # 2. Endpoints de Personal del Sistema (CRUD)
@@ -1345,17 +1533,241 @@ async def delete_system_user(
     db.commit()
     return {"status": "deleted"}
 
+# 3. Endpoints de Asignación de Fondos y Portales de Dashboard
+
+@app.post("/api/upspain/asignar-fondos")
+async def asignar_fondos(
+    item: AsignarFondosSchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    current_user = await get_current_upspain(request, db)
+    if not current_user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+    
+    gestor_uuid = uuid.UUID(item.gestor_id) if isinstance(item.gestor_id, str) else item.gestor_id
+    
+    gestor = db.query(UserModel).filter(UserModel.id == gestor_uuid, UserModel.rol == "gestor").first()
+    if not gestor:
+        return JSONResponse(status_code=400, content={"error": "El gestor especificado no existe o no tiene el rol de gestor."})
+        
+    existing = db.query(AFGModel).filter(
+        AFGModel.gestor_id == gestor_uuid,
+        AFGModel.codigo_proyecto_fse == item.codigo_proyecto_fse
+    ).first()
+    
+    from decimal import Decimal
+    if existing:
+        existing.presupuesto_total = Decimal(str(item.presupuesto_total))
+        existing.tasa_cofinanciacion = Decimal(str(item.tasa_cofinanciacion))
+        db.commit()
+        db.refresh(existing)
+        return {
+            "status": "updated",
+            "allocation": {
+                "id": str(existing.id),
+                "gestor_id": str(existing.gestor_id),
+                "codigo_proyecto_fse": existing.codigo_proyecto_fse,
+                "presupuesto_total": float(existing.presupuesto_total),
+                "presupuesto_consumido": float(existing.presupuesto_consumido),
+                "tasa_cofinanciacion": float(existing.tasa_cofinanciacion)
+            }
+        }
+    else:
+        new_alloc = AFGModel(
+            gestor_id=gestor_uuid,
+            codigo_proyecto_fse=item.codigo_proyecto_fse,
+            presupuesto_total=Decimal(str(item.presupuesto_total)),
+            tasa_cofinanciacion=Decimal(str(item.tasa_cofinanciacion)),
+            presupuesto_consumido=Decimal("0.00")
+        )
+        db.add(new_alloc)
+        db.commit()
+        db.refresh(new_alloc)
+        return {
+            "status": "created",
+            "allocation": {
+                "id": str(new_alloc.id),
+                "gestor_id": str(new_alloc.gestor_id),
+                "codigo_proyecto_fse": new_alloc.codigo_proyecto_fse,
+                "presupuesto_total": float(new_alloc.presupuesto_total),
+                "presupuesto_consumido": float(new_alloc.presupuesto_consumido),
+                "tasa_cofinanciacion": float(new_alloc.tasa_cofinanciacion)
+            }
+        }
+
+@app.get("/api/supermercado/dashboard-data")
+async def get_supermercado_dashboard_data(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    user = await get_current_supermercado(request, db)
+    if not user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+    
+    supermarket_id = user.email.split('@')[0]
+    
+    products = db.query(PSModel).filter(PSModel.supermercado_id == supermarket_id).all()
+    sales = db.query(ATModel).filter(ATModel.supermercado_id == supermarket_id).order_by(ATModel.timestamp.desc()).all()
+    total_billed = sum(float(s.total) for s in sales if s.estado == "APPROVED")
+    
+    return {
+        "supermercado_id": supermarket_id,
+        "products": [
+            {
+                "id": p.id,
+                "codigo_barras": p.codigo_barras,
+                "nombre": p.nombre,
+                "precio": float(p.precio),
+                "categoria_fse": p.categoria_fse,
+                "palabras_clave_ocr": p.palabras_clave_ocr
+            } for p in products
+        ],
+        "sales": [
+            {
+                "id": str(s.id),
+                "total": float(s.total),
+                "timestamp": s.timestamp.isoformat(),
+                "estado": s.estado
+            } for s in sales
+        ],
+        "kpis": {
+            "total_billed": total_billed,
+            "total_sales_count": len(sales)
+        }
+    }
+
+@app.get("/api/gestor/dashboard-data")
+async def get_gestor_dashboard_data(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    user = await get_current_gestor(request, db)
+    if not user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    gestor_id = user.id
+    
+    beneficiaries = db.query(UserModel).filter(
+        UserModel.rol == "beneficiario",
+        UserModel.gestor_uuid == gestor_id
+    ).order_by(UserModel.created_at.desc()).all()
+    
+    allocations = db.query(AFGModel).filter(
+        AFGModel.gestor_id == gestor_id
+    ).order_by(AFGModel.created_at.desc()).all()
+    
+    beneficiary_ids = [b.id for b in beneficiaries]
+    sales = []
+    if beneficiary_ids:
+        sales = db.query(ATModel).filter(
+            ATModel.usuario_uuid.in_(beneficiary_ids)
+        ).order_by(ATModel.timestamp.desc()).all()
+        
+    return {
+        "gestor_id": str(gestor_id),
+        "email": user.email,
+        "beneficiaries": [
+            {
+                "id": str(b.id),
+                "token_anonimo": b.token_anonimo,
+                "saldo_disponible": float(b.saldo_disponible),
+                "codigo_proyecto_fse": b.codigo_proyecto_fse
+            } for b in beneficiaries
+        ],
+        "allocations": [
+            {
+                "id": str(a.id),
+                "codigo_proyecto_fse": a.codigo_proyecto_fse,
+                "presupuesto_total": float(a.presupuesto_total),
+                "presupuesto_consumido": float(a.presupuesto_consumido),
+                "tasa_cofinanciacion": float(a.tasa_cofinanciacion)
+            } for a in allocations
+        ],
+        "sales": [
+            {
+                "id": str(s.id),
+                "usuario_uuid": str(s.usuario_uuid) if s.usuario_uuid else None,
+                "supermercado_id": s.supermercado_id,
+                "total": float(s.total),
+                "timestamp": s.timestamp.isoformat(),
+                "estado": s.estado
+            } for s in sales
+        ]
+    }
+
+@app.get("/api/upspain/dashboard-data")
+async def get_upspain_dashboard_data(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    user = await get_current_upspain(request, db)
+    if not user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    gestores = db.query(UserModel).filter(UserModel.rol == "gestor").all()
+    allocations = db.query(AFGModel).order_by(AFGModel.created_at.desc()).all()
+    sales = db.query(ATModel).order_by(ATModel.timestamp.desc()).all()
+    
+    total_budget = sum(float(a.presupuesto_total) for a in allocations)
+    total_consumed = sum(float(a.presupuesto_consumido) for a in allocations)
+    
+    gestor_map = {str(g.id): g.email for g in gestores}
+    
+    return {
+        "gestores": [
+            {
+                "id": str(g.id),
+                "email": g.email
+            } for g in gestores
+        ],
+        "allocations": [
+            {
+                "id": str(a.id),
+                "gestor_id": str(a.gestor_id),
+                "gestor_email": gestor_map.get(str(a.gestor_id), "Desconocido"),
+                "codigo_proyecto_fse": a.codigo_proyecto_fse,
+                "presupuesto_total": float(a.presupuesto_total),
+                "presupuesto_consumido": float(a.presupuesto_consumido),
+                "tasa_cofinanciacion": float(a.tasa_cofinanciacion)
+            } for a in allocations
+        ],
+        "sales": [
+            {
+                "id": str(s.id),
+                "usuario_uuid": str(s.usuario_uuid) if s.usuario_uuid else None,
+                "supermercado_id": s.supermercado_id,
+                "total": float(s.total),
+                "timestamp": s.timestamp.isoformat(),
+                "estado": s.estado
+            } for s in sales
+        ],
+        "kpis": {
+            "total_budget": total_budget,
+            "total_consumed": total_consumed,
+            "net_active_projects": len(set(a.codigo_proyecto_fse for a in allocations))
+        }
+    }
+
 from fastapi.responses import RedirectResponse
 import urllib.parse
 
 @app.get("/admin/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: Optional[str] = None):
+async def login_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     # Si ya tiene sesión autenticada y verificada por MFA, redirigir directo al dashboard
     session_token = request.cookies.get("session_token")
     if session_token and session_token in ADMIN_SESSIONS:
         sess = ADMIN_SESSIONS[session_token]
         if sess["mfa_verified"] and datetime.now() < sess["expires"]:
-            return RedirectResponse(url="/admin/dashboard", status_code=303)
+            user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+            if user:
+                redirect_urls = {
+                    "admin": "/admin/dashboard",
+                    "upspain": "/upspain/dashboard",
+                    "gestor": "/gestor/dashboard",
+                    "supermercado": "/supermercado/dashboard"
+                }
+                return RedirectResponse(url=redirect_urls.get(user.rol, "/admin/dashboard"), status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="login.html",
@@ -1370,9 +1782,9 @@ async def process_login(
     db: Session = Depends(get_db)
 ):
     try:
-        # Buscar el usuario admin
+        # Buscar el usuario de personal del sistema
         user = db.query(UserModel).filter(UserModel.email == email.strip()).first()
-        if not user or user.rol != "admin":
+        if not user or user.rol not in ["admin", "upspain", "gestor", "supermercado"]:
             return RedirectResponse(
                 url="/admin/login?error=" + urllib.parse.quote("Credenciales incorrectas o acceso no autorizado."),
                 status_code=303
@@ -1463,7 +1875,16 @@ async def process_setup_mfa(
             # Validar la sesión
             sess["mfa_verified"] = True
             sess["expires"] = datetime.now() + timedelta(hours=2)
-            return RedirectResponse(url="/admin/dashboard", status_code=303)
+            
+            # Redirección dinámica según rol
+            redirect_urls = {
+                "admin": "/admin/dashboard",
+                "upspain": "/upspain/dashboard",
+                "gestor": "/gestor/dashboard",
+                "supermercado": "/supermercado/dashboard"
+            }
+            target_url = redirect_urls.get(user.rol, "/admin/dashboard")
+            return RedirectResponse(url=target_url, status_code=303)
         else:
             return RedirectResponse(
                 url="/admin/setup-mfa?error=" + urllib.parse.quote("Código MFA inválido. Reintenta."),
@@ -1479,14 +1900,22 @@ async def process_setup_mfa(
         )
 
 @app.get("/admin/verify-mfa", response_class=HTMLResponse)
-async def verify_mfa_page(request: Request, error: Optional[str] = None):
+async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
     if not session_token or session_token not in ADMIN_SESSIONS:
         return RedirectResponse(url="/admin/login", status_code=303)
         
     sess = ADMIN_SESSIONS[session_token]
     if sess["mfa_verified"]:
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+        if user:
+            redirect_urls = {
+                "admin": "/admin/dashboard",
+                "upspain": "/upspain/dashboard",
+                "gestor": "/gestor/dashboard",
+                "supermercado": "/supermercado/dashboard"
+            }
+            return RedirectResponse(url=redirect_urls.get(user.rol, "/admin/dashboard"), status_code=303)
         
     return templates.TemplateResponse(
         request=request,
@@ -1514,7 +1943,16 @@ async def process_verify_mfa(
         if totp.verify(code.strip()):
             sess["mfa_verified"] = True
             sess["expires"] = datetime.now() + timedelta(hours=2)
-            return RedirectResponse(url="/admin/dashboard", status_code=303)
+            
+            # Redirección dinámica según rol
+            redirect_urls = {
+                "admin": "/admin/dashboard",
+                "upspain": "/upspain/dashboard",
+                "gestor": "/gestor/dashboard",
+                "supermercado": "/supermercado/dashboard"
+            }
+            target_url = redirect_urls.get(user.rol, "/admin/dashboard")
+            return RedirectResponse(url=target_url, status_code=303)
         else:
             return RedirectResponse(
                 url="/admin/verify-mfa?error=" + urllib.parse.quote("Código MFA incorrecto."),
@@ -1540,10 +1978,36 @@ async def logout(request: Request):
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
-    # Protección de sesión de administrador y MFA
     admin = await get_current_admin(request, db)
     if not admin:
         return RedirectResponse(url="/admin/login", status_code=303)
         
     html_path = BASE_DIR / "templates" / "dashboard.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+@app.get("/upspain/dashboard", response_class=HTMLResponse)
+async def upspain_dashboard(request: Request, db: Session = Depends(get_db)):
+    user = await get_current_upspain(request, db)
+    if not user:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    html_path = BASE_DIR / "templates" / "upspain_dashboard.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+@app.get("/gestor/dashboard", response_class=HTMLResponse)
+async def gestor_dashboard(request: Request, db: Session = Depends(get_db)):
+    user = await get_current_gestor(request, db)
+    if not user:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    html_path = BASE_DIR / "templates" / "gestor_dashboard.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+@app.get("/supermercado/dashboard", response_class=HTMLResponse)
+async def supermercado_dashboard(request: Request, db: Session = Depends(get_db)):
+    user = await get_current_supermercado(request, db)
+    if not user:
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    html_path = BASE_DIR / "templates" / "supermercado_dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))

@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Supermercado - Gestión de Catálogo FSE+</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #E35205;
+            --primary-hover: #F26218;
+            --primary-glow: rgba(227, 82, 5, 0.15);
+            --background: #0f1115;
+            --surface: rgba(26, 29, 36, 0.6);
+            --surface-card: #1a1d24;
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.15);
+            --danger: #ef4444;
+            --danger-bg: rgba(239, 68, 68, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--background);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: rgba(26, 29, 36, 0.8);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 1.8rem;
+        }
+
+        .logo-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #fff 0%, #d1d5db 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-tag {
+            background: var(--primary);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .user-nav {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .user-email {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .btn-logout {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-logout:hover {
+            background: var(--danger-bg);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 40px auto;
+            padding: 0 40px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .ambient-glow {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+            opacity: 0.02;
+            filter: blur(80px);
+            z-index: -1;
+            bottom: 10%;
+            left: 5%;
+            pointer-events: none;
+        }
+
+        /* Metrics grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+
+        .metric-card {
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+        }
+
+        .metric-label {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+
+        .metric-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Layout structure */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1.2fr 2.5fr;
+            gap: 32px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 32px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .panel-title-icon {
+            font-size: 1.4rem;
+        }
+
+        /* Form elements */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-main);
+            opacity: 0.9;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            background: rgba(15, 17, 21, 0.5);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            border-radius: 12px;
+            outline: none;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, var(--primary) 0%, #ff7e40 100%);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(227, 82, 5, 0.2);
+            margin-top: 8px;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(227, 82, 5, 0.35);
+        }
+
+        .csv-dropzone {
+            border: 2px dashed var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: rgba(255, 255, 255, 0.01);
+            color: var(--text-muted);
+        }
+
+        .csv-dropzone:hover {
+            border-color: var(--primary);
+            background: rgba(227, 82, 5, 0.02);
+            color: var(--text-main);
+        }
+
+        /* Table styling */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: rgba(15, 17, 21, 0.3);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.92rem;
+        }
+
+        th {
+            background: rgba(26, 29, 36, 0.5);
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 99px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            display: inline-block;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .badge-orange {
+            background: rgba(227, 82, 5, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(227, 82, 5, 0.2);
+        }
+
+        .badge-gray {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<header>
+    <div class="logo-section">
+        <span class="logo-icon">🛒</span>
+        <span class="logo-title" id="logo-title-store">Supermercado</span>
+        <span class="logo-tag">Establecimiento FSE+</span>
+    </div>
+    <div class="user-nav">
+        <span class="user-email" id="header-email">Establecimiento Autorizado</span>
+        <a href="/admin/logout" class="btn-logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<div class="container">
+    <!-- METRICS GRID -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <span class="metric-label">Facturación Total FSE+</span>
+            <span class="metric-value" id="kpi-total-billed">€0,00</span>
+            <span class="metric-sub">Cobros validados acumulados</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">Ventas Validadas</span>
+            <span class="metric-value" id="kpi-sales-count">0</span>
+            <span class="metric-sub">Tickets escaneados y aprobados</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">Productos en Catálogo</span>
+            <span class="metric-value" id="kpi-products-count">0</span>
+            <span class="metric-sub">Referencias EAN activas</span>
+        </div>
+    </div>
+
+    <!-- MAIN GRID LAYOUT -->
+    <div class="main-layout">
+        <!-- SIDEBAR: PRODUCT FORMS & CSV IMPORT -->
+        <div style="display: flex; flex-direction: column; gap: 32px;">
+            <!-- FORMULARIO DE PRODUCTO -->
+            <div class="panel">
+                <div class="panel-title">
+                    <span class="panel-title-icon">🏷️</span>
+                    <span>Guardar Producto</span>
+                </div>
+                <form id="product-form">
+                    <input type="hidden" id="supermercado_id_val" name="supermercado_id" value="">
+                    <div class="form-group">
+                        <label for="codigo_barras">Código de Barras (EAN-13)</label>
+                        <input type="text" id="codigo_barras" name="codigo_barras" placeholder="Ej: 8410000000001" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="nombre">Nombre de Producto</label>
+                        <input type="text" id="nombre" name="nombre" placeholder="Ej: Leche desnatada Hacendado" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="precio">Precio Ref. (€)</label>
+                        <input type="number" step="0.01" id="precio" name="precio" placeholder="Ej: 0.95" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="categoria_fse">Categoría FSE+</label>
+                        <select id="categoria_fse" name="categoria_fse">
+                            <option value="unknown">Desconocida / Básica</option>
+                            <option value="dairy">Lácteos</option>
+                            <option value="beverages">Bebidas (No Alcohol)</option>
+                            <option value="oils">Aceites y Grasas</option>
+                            <option value="grains">Cereales y Arroces</option>
+                            <option value="pasta">Pastas</option>
+                            <option value="bakery">Pan y Bollería</option>
+                            <option value="meat">Carnes y Embutidos</option>
+                            <option value="hygiene">Higiene Personal</option>
+                            <option value="baby">Productos Bebé</option>
+                            <option value="cleaning">Limpieza del Hogar</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="palabras_clave_ocr">Palabras Clave OCR (separadas por comas)</label>
+                        <input type="text" id="palabras_clave_ocr" name="palabras_clave_ocr" placeholder="Ej: LECH, SEMI, HAC">
+                    </div>
+                    <button type="submit" class="btn-submit">Guardar Referencia</button>
+                </form>
+            </div>
+
+            <!-- CARGA CSV MASIVA -->
+            <div class="panel">
+                <div class="panel-title">
+                    <span class="panel-title-icon">📤</span>
+                    <span>Carga Masiva (CSV)</span>
+                </div>
+                <form id="csv-form" enctype="multipart/form-data">
+                    <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:12px;">
+                        Sube un archivo CSV con las columnas <code>codigo_barras</code>, <code>nombre</code> y <code>precio</code> (también admite <code>categoria_fse</code> y <code>palabras_clave_ocr</code>).
+                    </p>
+                    <div class="form-group">
+                        <input type="file" id="csv-file" name="file" accept=".csv" required style="display:none;">
+                        <div class="csv-dropzone" onclick="document.getElementById('csv-file').click()" id="dropzone">
+                            <span>📂 Haz clic para seleccionar archivo CSV</span>
+                            <div style="font-size:0.75rem; margin-top:4px;" id="file-name">Ningún archivo seleccionado</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">Subir Lote CSV</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT: CATALOG TABLE & SALES HISTORY -->
+        <div style="display: flex; flex-direction: column; gap: 32px;">
+            <div class="panel">
+                <div class="panel-title">
+                    <span class="panel-title-icon">📦</span>
+                    <span>Referencias del Catálogo Activo</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>EAN / Barras</th>
+                                <th>Nombre</th>
+                                <th>Precio</th>
+                                <th>Categoría FSE+</th>
+                                <th>Claves OCR</th>
+                            </tr>
+                        </thead>
+                        <tbody id="products-table-body">
+                            <tr>
+                                <td colspan="5" class="empty-state">Cargando catálogo...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">
+                    <span class="panel-title-icon">💸</span>
+                    <span>Registro de Ventas y Cobros validados FSE+</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID Cobro</th>
+                                <th>Fecha y Hora</th>
+                                <th>Total Cobrado</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sales-table-body">
+                            <tr>
+                                <td colspan="4" class="empty-state">Cargando ventas...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast-notif">
+    <span id="toast-icon"></span>
+    <span id="toast-message"></span>
+</div>
+
+<script>
+    let currentStoreId = '';
+
+    function formatEuro(val) {
+        return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(val);
+    }
+
+    function formatTime(isoStr) {
+        const d = new Date(isoStr);
+        return d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function showToast(message, type = 'success') {
+        const toast = document.getElementById('toast-notif');
+        const icon = document.getElementById('toast-icon');
+        const msg = document.getElementById('toast-message');
+
+        toast.className = `toast show ${type}`;
+        icon.textContent = type === 'success' ? '✅' : '❌';
+        msg.textContent = message;
+
+        setTimeout(() => {
+            toast.className = 'toast';
+        }, 4000);
+    }
+
+    // Display selected file name
+    document.getElementById('csv-file').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        document.getElementById('file-name').textContent = file ? file.name : 'Ningún archivo seleccionado';
+    });
+
+    async function loadDashboard() {
+        try {
+            const res = await fetch('/api/supermercado/dashboard-data');
+            if (res.status === 403) {
+                window.location.href = '/admin/login';
+                return;
+            }
+            const data = await res.json();
+
+            currentStoreId = data.supermercado_id;
+            document.getElementById('supermercado_id_val').value = currentStoreId;
+
+            // Set headers/titles
+            const cleanStoreName = currentStoreId.toUpperCase();
+            document.getElementById('logo-title-store').textContent = cleanStoreName;
+            document.getElementById('header-email').textContent = `Conectado como: ${cleanStoreName} (Cajero Principal)`;
+
+            // KPIs
+            document.getElementById('kpi-total-billed').textContent = formatEuro(data.kpis.total_billed);
+            document.getElementById('kpi-sales-count').textContent = data.kpis.total_sales_count;
+            document.getElementById('kpi-products-count').textContent = data.products.length;
+
+            // Catalog table
+            const prodTbody = document.getElementById('products-table-body');
+            prodTbody.innerHTML = '';
+            if (data.products && data.products.length > 0) {
+                data.products.forEach(p => {
+                    const keywords = p.palabras_clave_ocr && p.palabras_clave_ocr.length > 0
+                        ? p.palabras_clave_ocr.join(', ')
+                        : 'Ninguna';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="font-family: monospace; font-size:0.85rem; font-weight:600; color:var(--primary);">${p.codigo_barras}</td>
+                        <td style="font-weight: 500;">${p.nombre}</td>
+                        <td style="font-weight: 700;">${formatEuro(p.precio)}</td>
+                        <td><span class="badge badge-orange">${p.categoria_fse || 'dairy'}</span></td>
+                        <td><span class="badge badge-gray" style="text-transform:none;">${keywords}</span></td>
+                    `;
+                    prodTbody.appendChild(tr);
+                });
+            } else {
+                prodTbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay referencias en el catálogo local.</td></tr>';
+            }
+
+            // Sales table
+            const salesTbody = document.getElementById('sales-table-body');
+            salesTbody.innerHTML = '';
+            if (data.sales && data.sales.length > 0) {
+                data.sales.forEach(s => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="font-family: monospace; color:var(--text-muted); font-size:0.85rem;">${s.id.substring(0, 8)}...</td>
+                        <td>${formatTime(s.timestamp)}</td>
+                        <td style="font-weight:700;">${formatEuro(s.total)}</td>
+                        <td><span class="badge badge-success">${s.estado}</span></td>
+                    `;
+                    salesTbody.appendChild(tr);
+                });
+            } else {
+                salesTbody.innerHTML = '<tr><td colspan="4" class="empty-state">No se han registrado cobros.</td></tr>';
+            }
+
+        } catch (err) {
+            console.error(err);
+            showToast('Error al cargar datos del supermercado', 'error');
+        }
+    }
+
+    // Submit single product
+    document.getElementById('product-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const wordsStr = document.getElementById('palabras_clave_ocr').value;
+        const keywords = wordsStr 
+            ? wordsStr.split(',').map(k => k.trim()).filter(k => k.length > 0)
+            : [];
+
+        const payload = {
+            supermercado_id: currentStoreId,
+            codigo_barras: document.getElementById('codigo_barras').value.trim(),
+            nombre: document.getElementById('nombre').value.trim(),
+            precio: parseFloat(document.getElementById('precio').value),
+            categoria_fse: document.getElementById('categoria_fse').value,
+            palabras_clave_ocr: keywords
+        };
+
+        try {
+            // Note: the api accepts role as headers/query params, let's pass query param `role=supermercado`
+            const res = await fetch('/api/supermercado/producto?role=supermercado', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-Role': 'supermercado'
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.status === 200) {
+                showToast(`Producto '${payload.nombre}' guardado con éxito en el catálogo.`, 'success');
+                document.getElementById('product-form').reset();
+                // keep store id
+                document.getElementById('supermercado_id_val').value = currentStoreId;
+                loadDashboard();
+            } else {
+                showToast(data.error || 'Error al guardar referencia.', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error de red al guardar producto.', 'error');
+        }
+    });
+
+    // Upload batch CSV
+    document.getElementById('csv-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData();
+        formData.append('supermercado_id', currentStoreId);
+        formData.append('file', document.getElementById('csv-file').files[0]);
+
+        try {
+            const res = await fetch('/api/supermercado/upload-batch?role=supermercado', {
+                method: 'POST',
+                headers: {
+                    'X-Role': 'supermercado'
+                },
+                body: formData
+            });
+            const data = await res.json();
+            if (res.status === 200) {
+                showToast(`Carga masiva completada: ${data.creados} creados, ${data.actualizados} actualizados.`, 'success');
+                document.getElementById('csv-form').reset();
+                document.getElementById('file-name').textContent = 'Ningún archivo seleccionado';
+                loadDashboard();
+            } else {
+                showToast(data.error || 'Error al procesar lote CSV.', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error de red al procesar CSV.', 'error');
+        }
+    });
+
+    // Initial load
+    loadDashboard();
+</script>
+</body>
+</html>

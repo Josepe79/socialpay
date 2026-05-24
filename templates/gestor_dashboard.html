@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Gestor Social - Control de Beneficiarios FSE+</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #E35205;
+            --primary-hover: #F26218;
+            --primary-glow: rgba(227, 82, 5, 0.15);
+            --background: #0f1115;
+            --surface: rgba(26, 29, 36, 0.6);
+            --surface-card: #1a1d24;
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.15);
+            --danger: #ef4444;
+            --danger-bg: rgba(239, 68, 68, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--background);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: rgba(26, 29, 36, 0.8);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 1.8rem;
+        }
+
+        .logo-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #fff 0%, #d1d5db 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-tag {
+            background: var(--primary);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .user-nav {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .user-email {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .btn-logout {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .btn-logout:hover {
+            background: var(--danger-bg);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+
+        .container {
+            max-width: 1400px;
+            width: 100%;
+            margin: 40px auto;
+            padding: 0 40px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .ambient-glow {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--success) 0%, transparent 70%);
+            opacity: 0.02;
+            filter: blur(80px);
+            z-index: -1;
+            top: 20%;
+            right: 10%;
+            pointer-events: none;
+        }
+
+        /* Metrics grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+
+        .metric-card {
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--success);
+        }
+
+        .metric-card.orange::after {
+            background: var(--primary);
+        }
+
+        .metric-label {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+
+        .metric-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Two column layout */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 2.5fr;
+            gap: 32px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 32px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .panel-title-icon {
+            font-size: 1.4rem;
+        }
+
+        /* Forms styling */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-main);
+            opacity: 0.9;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            background: rgba(15, 17, 21, 0.5);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            border-radius: 12px;
+            outline: none;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--success);
+            box-shadow: 0 0 0 3px var(--success-glow);
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, var(--success) 0%, #34d399 100%);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+            margin-top: 8px;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35);
+        }
+
+        .btn-cancel {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 10px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 500;
+            text-align: center;
+            display: none;
+            transition: all 0.2s;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Table styling */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: rgba(15, 17, 21, 0.3);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.92rem;
+        }
+
+        th {
+            background: rgba(26, 29, 36, 0.5);
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 99px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            display: inline-block;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .badge-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .badge-orange {
+            background: rgba(227, 82, 5, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(227, 82, 5, 0.2);
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .action-btn.edit:hover {
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .action-btn.delete:hover {
+            color: var(--danger);
+            background: var(--danger-bg);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .project-chip {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .project-chip-left {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .project-chip-title {
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .project-chip-budget {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .project-chip-pct {
+            font-weight: 700;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<header>
+    <div class="logo-section">
+        <span class="logo-icon">🤝</span>
+        <span class="logo-title">SocialPay MVP</span>
+        <span class="logo-tag" style="background: var(--success);">Gestor Social</span>
+    </div>
+    <div class="user-nav">
+        <span class="user-email" id="header-email">Sesión Autorizada</span>
+        <a href="/admin/logout" class="btn-logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<div class="container">
+    <!-- METRICS GRID -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <span class="metric-label">Presupuesto Asignado</span>
+            <span class="metric-value" id="kpi-total-budget">€0,00</span>
+            <span class="metric-sub">Límite concedido por Up Spain</span>
+        </div>
+        <div class="metric-card orange">
+            <span class="metric-label">Saldo Asignado a Beneficiarios</span>
+            <span class="metric-value" id="kpi-total-assigned">€0,00</span>
+            <span class="metric-sub">Fondos FSE+ distribuidos</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">Presupuesto Disponible</span>
+            <span class="metric-value" id="kpi-total-available">€0,00</span>
+            <span class="metric-sub" style="color: var(--success);">Disponible para asignación</span>
+        </div>
+    </div>
+
+    <!-- MAIN GRID LAYOUT -->
+    <div class="main-layout">
+        <!-- SIDEBAR: FORM & PROJECT POOLS -->
+        <div style="display: flex; flex-direction: column; gap: 32px;">
+            <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div class="panel-title-left">
+                        <span class="panel-title-icon" id="form-icon">👤</span>
+                        <span id="form-title">Registrar Beneficiario</span>
+                    </div>
+                </div>
+                <form id="beneficiary-form">
+                    <input type="hidden" id="edit-user-id" value="">
+                    <div class="form-group">
+                        <label for="token_anonimo">Token Anónimo (Código RGPD)</label>
+                        <input type="text" id="token_anonimo" name="token_anonimo" placeholder="Ej: AS-2026-X89" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="codigo_proyecto_fse">Proyecto FSE+ Asociado</label>
+                        <select id="codigo_proyecto_fse" name="codigo_proyecto_fse" required>
+                            <option value="">Cargando proyectos...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="saldo_disponible">Saldo Disponible (€)</label>
+                        <input type="number" step="0.01" id="saldo_disponible" name="saldo_disponible" placeholder="Ej: 150.00" required>
+                    </div>
+                    <button type="submit" class="btn-submit" id="btn-submit-text">Crear Beneficiario</button>
+                    <button type="button" class="btn-cancel" id="btn-cancel-edit">Cancelar Edición</button>
+                </form>
+            </div>
+
+            <!-- PROYECTOS ACTIVOS -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div class="panel-title-left">
+                        <span class="panel-title-icon">📂</span>
+                        <span>Límites FSE+ por Proyecto</span>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 12px;" id="projects-list-container">
+                    <div class="empty-state">No hay presupuestos FSE+ vinculados.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT: BENEFICIARIES TABLE & TRANSACTIONS -->
+        <div style="display: flex; flex-direction: column; gap: 32px;">
+            <div class="panel">
+                <div class="panel-title">
+                    <div class="panel-title-left">
+                        <span class="panel-title-icon">👥</span>
+                        <span>Beneficiarios Activos en tus Proyectos</span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Token Anónimo</th>
+                                <th>Proyecto FSE+</th>
+                                <th>Saldo Asignado</th>
+                                <th style="text-align: right;">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="beneficiaries-table-body">
+                            <tr>
+                                <td colspan="4" class="empty-state">Cargando beneficiarios...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">
+                    <div class="panel-title-left">
+                        <span class="panel-title-icon">🧾</span>
+                        <span>Historial de Compras de tus Beneficiarios</span>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Beneficiario</th>
+                                <th>Supermercado</th>
+                                <th>Importe</th>
+                                <th>Fecha y Hora</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactions-table-body">
+                            <tr>
+                                <td colspan="5" class="empty-state">Cargando compras...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast-notif">
+    <span id="toast-icon"></span>
+    <span id="toast-message"></span>
+</div>
+
+<script>
+    let activeAllocations = [];
+    let isEditing = false;
+
+    function formatEuro(val) {
+        return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(val);
+    }
+
+    function formatTime(isoStr) {
+        const d = new Date(isoStr);
+        return d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function showToast(message, type = 'success') {
+        const toast = document.getElementById('toast-notif');
+        const icon = document.getElementById('toast-icon');
+        const msg = document.getElementById('toast-message');
+
+        toast.className = `toast show ${type}`;
+        icon.textContent = type === 'success' ? '✅' : '❌';
+        msg.textContent = message;
+
+        setTimeout(() => {
+            toast.className = 'toast';
+        }, 4000);
+    }
+
+    async function loadDashboard() {
+        try {
+            const res = await fetch('/api/gestor/dashboard-data');
+            if (res.status === 403) {
+                window.location.href = '/admin/login';
+                return;
+            }
+            const data = await res.json();
+
+            // Set user email
+            document.getElementById('header-email').textContent = `Conectado como: ${data.email}`;
+
+            activeAllocations = data.allocations || [];
+
+            // Calculate overall KPIs
+            let totalBudget = 0;
+            let totalAssigned = 0;
+            activeAllocations.forEach(a => {
+                totalBudget += a.presupuesto_total;
+                totalAssigned += a.presupuesto_consumido;
+            });
+            let totalAvailable = Math.max(0, totalBudget - totalAssigned);
+
+            document.getElementById('kpi-total-budget').textContent = formatEuro(totalBudget);
+            document.getElementById('kpi-total-assigned').textContent = formatEuro(totalAssigned);
+            document.getElementById('kpi-total-available').textContent = formatEuro(totalAvailable);
+
+            // Render project list chips
+            const projListContainer = document.getElementById('projects-list-container');
+            projListContainer.innerHTML = '';
+            
+            // Populate project dropdown as well
+            const projDropdown = document.getElementById('codigo_proyecto_fse');
+            projDropdown.innerHTML = '<option value="">Selecciona un proyecto...</option>';
+
+            if (activeAllocations.length > 0) {
+                activeAllocations.forEach(a => {
+                    const pct = a.presupuesto_total > 0 ? Math.round((a.presupuesto_consumido / a.presupuesto_total) * 100) : 0;
+                    
+                    // chip
+                    const chip = document.createElement('div');
+                    chip.className = 'project-chip';
+                    chip.innerHTML = `
+                        <div class="project-chip-left">
+                            <span class="project-chip-title">${a.codigo_proyecto_fse}</span>
+                            <span class="project-chip-budget">${formatEuro(a.presupuesto_consumido)} de ${formatEuro(a.presupuesto_total)} (${Math.round(a.tasa_cofinanciacion * 100)}% cofin.)</span>
+                        </div>
+                        <span class="project-chip-pct" style="color: ${pct >= 90 ? 'var(--danger)' : 'var(--success)'};">${pct}%</span>
+                    `;
+                    projListContainer.appendChild(chip);
+
+                    // dropdown option
+                    const opt = document.createElement('option');
+                    opt.value = a.codigo_proyecto_fse;
+                    opt.textContent = `${a.codigo_proyecto_fse} (Disp: ${formatEuro(a.presupuesto_total - a.presupuesto_consumido)})`;
+                    projDropdown.appendChild(opt);
+                });
+            } else {
+                projListContainer.innerHTML = '<div class="empty-state">No tienes ningún presupuesto FSE+ asignado por Up Spain aún.</div>';
+                projDropdown.innerHTML = '<option value="">No hay proyectos disponibles</option>';
+            }
+
+            // Render Beneficiaries Table
+            const benTbody = document.getElementById('beneficiaries-table-body');
+            benTbody.innerHTML = '';
+            if (data.beneficiaries && data.beneficiaries.length > 0) {
+                data.beneficiaries.forEach(b => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="font-weight: 600;">${b.token_anonimo}</td>
+                        <td><span class="badge badge-info">${b.codigo_proyecto_fse || 'No asignado'}</span></td>
+                        <td style="font-weight: 700;">${formatEuro(b.saldo_disponible)}</td>
+                        <td style="text-align: right;">
+                            <button class="action-btn edit" onclick="startEdit('${b.id}', '${b.token_anonimo}', '${b.codigo_proyecto_fse}', ${b.saldo_disponible})">✍️ Editar</button>
+                            <button class="action-btn delete" onclick="deleteBeneficiary('${b.id}', '${b.token_anonimo}')">🗑️ Borrar</button>
+                        </td>
+                    `;
+                    benTbody.appendChild(tr);
+                });
+            } else {
+                benTbody.innerHTML = '<tr><td colspan="4" class="empty-state">No se han registrado beneficiarios.</td></tr>';
+            }
+
+            // Render transactions table
+            const transTbody = document.getElementById('transactions-table-body');
+            transTbody.innerHTML = '';
+            
+            // Map beneficiaries for nice display
+            const benMap = {};
+            if (data.beneficiaries) {
+                data.beneficiaries.forEach(b => { benMap[b.id] = b.token_anonimo; });
+            }
+
+            if (data.sales && data.sales.length > 0) {
+                data.sales.forEach(s => {
+                    const tr = document.createElement('tr');
+                    const name = benMap[s.usuario_uuid] || 'Anonimo';
+                    tr.innerHTML = `
+                        <td style="font-weight: 500;">${name}</td>
+                        <td style="text-transform: capitalize;">${s.supermercado_id}</td>
+                        <td style="font-weight:700;">${formatEuro(s.total)}</td>
+                        <td>${formatTime(s.timestamp)}</td>
+                        <td><span class="badge badge-success">${s.estado}</span></td>
+                    `;
+                    transTbody.appendChild(tr);
+                });
+            } else {
+                transTbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay registros de compras de tus beneficiarios.</td></tr>';
+            }
+
+        } catch (err) {
+            console.error(err);
+            showToast('Error al cargar datos del gestor', 'error');
+        }
+    }
+
+    // Submit form (create or edit)
+    document.getElementById('beneficiary-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const userId = document.getElementById('edit-user-id').value;
+        const payload = {
+            token_anonimo: document.getElementById('token_anonimo').value.trim(),
+            codigo_proyecto_fse: document.getElementById('codigo_proyecto_fse').value,
+            saldo_disponible: parseFloat(document.getElementById('saldo_disponible').value)
+        };
+
+        const url = isEditing 
+            ? `/api/admin/beneficiaries/${userId}` 
+            : '/api/admin/beneficiaries';
+        const method = isEditing ? 'PUT' : 'POST';
+
+        try {
+            const res = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.status === 200) {
+                showToast(`Operación realizada con éxito. Beneficiario guardado.`, 'success');
+                cancelEdit();
+                loadDashboard();
+            } else {
+                showToast(data.error || 'Error al guardar beneficiario.', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error de red al registrar beneficiario.', 'error');
+        }
+    });
+
+    function startEdit(id, token, project, saldo) {
+        isEditing = true;
+        document.getElementById('edit-user-id').value = id;
+        document.getElementById('token_anonimo').value = token;
+        document.getElementById('codigo_proyecto_fse').value = project;
+        document.getElementById('saldo_disponible').value = saldo;
+
+        document.getElementById('form-title').textContent = 'Editar Beneficiario';
+        document.getElementById('form-icon').textContent = '✍️';
+        document.getElementById('btn-submit-text').textContent = 'Guardar Cambios';
+        document.getElementById('btn-cancel-edit').style.display = 'block';
+    }
+
+    function cancelEdit() {
+        isEditing = false;
+        document.getElementById('edit-user-id').value = '';
+        document.getElementById('token_anonimo').value = '';
+        document.getElementById('codigo_proyecto_fse').value = '';
+        document.getElementById('saldo_disponible').value = '';
+
+        document.getElementById('form-title').textContent = 'Registrar Beneficiario';
+        document.getElementById('form-icon').textContent = '👤';
+        document.getElementById('btn-submit-text').textContent = 'Crear Beneficiario';
+        document.getElementById('btn-cancel-edit').style.display = 'none';
+    }
+
+    document.getElementById('btn-cancel-edit').addEventListener('click', cancelEdit);
+
+    async function deleteBeneficiary(id, token) {
+        if (!confirm(`¿Estás seguro de eliminar el beneficiario con token ${token}? El saldo disponible será devuelto al presupuesto del proyecto.`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/admin/beneficiaries/${id}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+            if (res.status === 200) {
+                showToast(`Beneficiario ${token} eliminado correctamente.`, 'success');
+                loadDashboard();
+            } else {
+                showToast(data.error || 'Error al eliminar beneficiario.', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error de red al borrar beneficiario.', 'error');
+        }
+    }
+
+    // Initial load
+    loadDashboard();
+</script>
+</body>
+</html>

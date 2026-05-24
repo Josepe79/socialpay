@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR, Boolean
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR, Boolean, CheckConstraint
 from sqlalchemy.types import TypeDecorator
 from app.database import Base
 
@@ -64,7 +64,30 @@ class Usuario(Base):
     mfa_secret = Column(String, nullable=True) # Clave TOTP en Base32
     mfa_enabled = Column(Boolean, default=False, nullable=False) # True si el QR ha sido vinculado y verificado
     
+    # Campos para relaciones presupuestarias y compliance
+    gestor_uuid = Column(GUID(), ForeignKey('usuarios.id', ondelete='SET NULL'), nullable=True)
+    codigo_proyecto_fse = Column(String, nullable=True) # Proyecto FSE asignado para beneficiarios
+    
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class AsignacionFondosGestor(Base):
+    """
+    Tabla de registro y control de fondos FSE+ asignados por Up Spain a Gestores Sociales.
+    """
+    __tablename__ = 'asignacion_fondos_gestor'
+    
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    gestor_id = Column(GUID(), ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    codigo_proyecto_fse = Column(String, nullable=False, index=True)
+    presupuesto_total = Column(Numeric(10, 2), nullable=False)
+    presupuesto_consumido = Column(Numeric(10, 2), default=0.00, nullable=False)
+    tasa_cofinanciacion = Column(Numeric(5, 2), nullable=False) # Ej: 0.70 para el 70%
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Restricción a nivel de BD para compliance financiero estricto
+    __table_args__ = (
+        CheckConstraint('presupuesto_consumido <= presupuesto_total', name='check_presupuesto_consumido_limit'),
+    )
 
 class ProductoSupermercado(Base):
     """
