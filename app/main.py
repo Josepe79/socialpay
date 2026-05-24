@@ -110,7 +110,11 @@ async def get_current_supermercado(request: Request, db: Session = Depends(get_d
 async def get_current_staff(request: Request, db: Session = Depends(get_db)):
     return await get_current_user_by_roles(request, ["admin", "upspain", "gestor", "supermercado"], db)
 
-app = FastAPI(title="SocialPay MVP")
+app = FastAPI(
+    title="Plataforma de Validación y Auditoría de Ayudas Sociales FSE+",
+    description="API gubernamental y corporativa para la gestión segregada de roles, carga batch de catálogos de supermercados, asignación de fondos de cohesión social FSE+ y validación automatizada de tickets de compra mediante visión artificial por OCR, garantizando cumplimiento financiero y RGPD.",
+    version="1.0.0"
+)
 
 # Paths setup
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -566,7 +570,7 @@ def mem_search(q: str) -> list:
 
 from fastapi.responses import RedirectResponse
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, summary="Acceso del Beneficiario / Index", description="Renderiza la interfaz principal o aplicación móvil del beneficiario FSE+. Si no está autenticado mediante su token anónimo, se le redirige al portal de login correspondiente.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def read_root(
     request: Request,
     token: Optional[str] = Query(None),
@@ -592,7 +596,7 @@ async def read_root(
     response.set_cookie(key="beneficiary_token", value=user.token_anonimo, httponly=True)
     return response
 
-@app.post("/beneficiario/login")
+@app.post("/beneficiario/login", summary="Iniciar Sesión del Beneficiario", description="Autentica al beneficiario en la aplicación utilizando su código de acceso único o token anónimo, configurando una cookie HTTPOnly.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def process_beneficiary_login(
     request: Request,
     token: str = Form(...),
@@ -611,13 +615,13 @@ async def process_beneficiary_login(
     response.set_cookie(key="beneficiary_token", value=user.token_anonimo, httponly=True)
     return response
 
-@app.get("/beneficiario/logout")
+@app.get("/beneficiario/logout", summary="Cerrar Sesión del Beneficiario", description="Limpia las cookies del beneficiario y cierra su sesión activa redirigiéndole a la pantalla de inicio.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def beneficiary_logout():
     response = RedirectResponse(url="/", status_code=303)
     response.delete_cookie("beneficiary_token")
     return response
 
-@app.post("/scan-product")
+@app.post("/scan-product", summary="Escaneo de Código de Barras", description="Procesa y busca un código de barras en el catálogo del sistema. Si no existe, realiza una consulta automatizada a Open Food Facts y lo aprende de forma dinámica.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def scan_product(barcode: str = Form(...)):
     """Busca producto en DB → caché en memoria → OFF. Guarda lo que aprende."""
     # 1. Buscar en DB
@@ -639,12 +643,12 @@ async def scan_product(barcode: str = Form(...)):
         )
     return info
 
-@app.post("/scan/manual")
+@app.post("/scan/manual", summary="Adición Manual al Carrito", description="Permite al beneficiario agregar de forma manual referencias de productos sin código de barras al carrito virtual.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
     """Registra un producto añadido manualmente al carrito."""
     return {"status": "success", "name": product_name, "price": price}
 
-@app.get("/api/search")
+@app.get("/api/search", summary="Buscador Predictivo de Productos", description="Buscador instantáneo en el catálogo del supermercado seleccionado que se auto-enriquece de forma síncrona consultando fuentes externas.", tags=["[BENEFICIARIO] Aplicación Móvil"])
 async def search_products(q: str, supermarket: str = Query(default=None)):
     """Búsqueda en DB (instantánea). Enriquece con OFF si responde en <2s."""
     if not q or len(q.strip()) < 2:
@@ -679,12 +683,31 @@ async def search_products(q: str, supermarket: str = Query(default=None)):
 
 # ── Admin: Catálogo de Productos ───────────────────────────────────────────────
 
-@app.get("/api/admin/products")
+@app.get(
+    "/api/admin/products",
+    summary="Listar Catálogo de Productos Globales",
+    description="Obtiene la lista completa de productos registrados en el sistema, permitiendo filtrar opcionalmente por un supermercado específico. Accesible por administradores globales.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Listado de productos recuperado con éxito."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes o sesión no válida."}
+    }
+)
 async def list_products(supermarket: str = Query(default=None)):
     """Lista todos los productos, opcionalmente filtrados por supermercado."""
     return {"products": db_all_products(supermarket)}
 
-@app.post("/api/admin/products")
+@app.post(
+    "/api/admin/products",
+    summary="Añadir o Actualizar Producto en Catálogo Global",
+    description="Inserta un nuevo producto en el catálogo general o actualiza uno existente utilizando su código de barras. Permite opcionalmente asociarlo a un supermercado y asignarle un precio de referencia.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Producto añadido o actualizado con éxito en el catálogo."},
+        400: {"description": "Datos de entrada incorrectos o faltantes."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes."}
+    }
+)
 async def add_product(
     barcode: str = Form(...),
     name: str = Form(...),
@@ -715,7 +738,18 @@ async def add_product(
 
     return {"status": "ok", "barcode": barcode, "name": name}
 
-@app.delete("/api/admin/products/{barcode}")
+@app.delete(
+    "/api/admin/products/{barcode}",
+    summary="Eliminar Producto del Catálogo Global",
+    description="Elimina de forma permanente un producto del catálogo global utilizando su código de barras único.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Producto eliminado con éxito o base de datos no configurada."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes."},
+        404: {"description": "Producto no encontrado."},
+        500: {"description": "Error interno al procesar la eliminación."}
+    }
+)
 async def delete_product(barcode: str):
     """Elimina un producto del catálogo."""
     if not DATABASE_URL:
@@ -741,7 +775,17 @@ class SupermarketProductSchema(BaseModel):
     categoria_fse: Optional[str] = None
     palabras_clave_ocr: Optional[List[str]] = []
 
-@app.post("/api/supermercado/producto")
+@app.post(
+    "/api/supermercado/producto",
+    summary="Añadir o Actualizar Referencia en Supermercado",
+    description="Permite a un supermercado autenticado gestionar de forma individual un producto en su catálogo, incluyendo código de barras, nombre, precio, categoría FSE+ y palabras clave para la validación OCR. Protegido contra escalada de privilegios IDOR.",
+    tags=["[SUPERMERCADO] Catálogos"],
+    responses={
+        200: {"description": "Producto creado o actualizado con éxito en el catálogo del supermercado."},
+        400: {"description": "Campos obligatorios vacíos o precio inválido."},
+        403: {"description": "Acceso denegado. IDOR detectado o rol inválido."}
+    }
+)
 async def add_or_update_supermarket_product(
     item: SupermarketProductSchema,
     request: Request,
@@ -809,7 +853,18 @@ async def add_or_update_supermarket_product(
         "nombre": item.nombre
     }
 
-@app.post("/api/supermercado/upload-batch")
+@app.post(
+    "/api/supermercado/upload-batch",
+    summary="Carga Masiva de Productos de Supermercado (CSV)",
+    description="Procesa de forma masiva un catálogo de productos a través de un archivo CSV. Realiza validaciones estrictas y sanitización con expresiones regulares para prevenir SQL Injection, XSS y asegurar el formato EAN del código de barras. Protegido contra IDOR.",
+    tags=["[SUPERMERCADO] Catálogos"],
+    responses={
+        200: {"description": "Procesamiento de lote CSV completado con éxito, devolviendo estadísticas y posibles advertencias."},
+        400: {"description": "Filtros inválidos, cabeceras del CSV faltantes o formato de archivo no permitido (solo CSV)."},
+        403: {"description": "Acceso denegado. El supermercado autenticado difiere del supermercado indicado en la carga (prevención IDOR)."},
+        500: {"description": "Error crítico durante el procesamiento masivo del archivo."}
+    }
+)
 async def upload_batch_products(
     request: Request,
     supermercado_id: str = Form(...),
@@ -829,7 +884,7 @@ async def upload_batch_products(
             f"Intento de IDOR detectado. Supermercado '{user_supermarket_id}' intento realizar carga masiva para '{supermercado_id}'"
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="Acceso denegado. No autorizado a modificar este supermercado."
         )
 
@@ -1043,7 +1098,17 @@ def ocr_ticket_via_gemini(image_path: Path, cart_items: list, supermarket: str) 
         print(f"[OCR] Error calling Gemini: {error_msg}")
         return None, error_msg
 
-@app.post("/upload-ticket")
+@app.post(
+    "/upload-ticket",
+    summary="Subir Ticket y Validar mediante OCR",
+    description="Permite subir un ticket de compra físico en formato de imagen para su validación automatizada mediante OCR (Gemini). Cruza los datos del ticket con el carrito virtual y las referencias permitidas del FSE+. Descuenta el saldo del beneficiario y registra la transacción si es aprobada. Protegido contra manipulación de precios.",
+    tags=["[BENEFICIARIO] Aplicación Móvil"],
+    responses={
+        200: {"description": "Validación de ticket completada con éxito, devolviendo el informe detallado."},
+        400: {"description": "Saldo insuficiente en la cuenta del beneficiario."},
+        403: {"description": "Acceso denegado. Beneficiario no autenticado."}
+    }
+)
 async def upload_ticket(
     request: Request,
     ticket: UploadFile = File(...),
@@ -1180,7 +1245,16 @@ async def upload_ticket(
 
     return report
 
-@app.get("/api/admin/audit-logs")
+@app.get(
+    "/api/admin/audit-logs",
+    summary="Consultar Registro de Auditoría Global",
+    description="Recupera la lista inmutable de logs de auditoría de transacciones para fines de cumplimiento financiero y control de fraude. Accesible por administradores globales.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Listado de registros de auditoría recuperado con éxito."},
+        403: {"description": "Acceso denegado. Rol no autorizado."}
+    }
+)
 async def get_audit_logs():
     return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
 
@@ -1209,7 +1283,16 @@ class AsignarFondosSchema(BaseModel):
 
 # 1. Endpoints de Beneficiarios (CRUD)
 
-@app.get("/api/admin/beneficiaries")
+@app.get(
+    "/api/admin/beneficiaries",
+    summary="Listar Beneficiarios Social Pay",
+    description="Obtiene el listado de beneficiarios registrados. Si el usuario es gestor, solo recuperará los beneficiarios vinculados a su código de gestor. Si es admin, los obtendrá todos.",
+    tags=["[GESTOR] Acción Social"],
+    responses={
+        200: {"description": "Listado de beneficiarios recuperado con éxito."},
+        403: {"description": "Acceso denegado. No autorizado."}
+    }
+)
 async def list_beneficiaries(
     request: Request,
     db: Session = Depends(get_db)
@@ -1238,7 +1321,17 @@ async def list_beneficiaries(
         ]
     }
 
-@app.post("/api/admin/beneficiaries")
+@app.post(
+    "/api/admin/beneficiaries",
+    summary="Crear Beneficiario Social Pay",
+    description="Crea un nuevo beneficiario FSE+ seudonimizado con un saldo inicial asignado. Si el creador es gestor, verifica que no se exceda el presupuesto asignado al proyecto FSE en una transacción segura.",
+    tags=["[GESTOR] Acción Social"],
+    responses={
+        200: {"description": "Beneficiario creado con éxito."},
+        400: {"description": "Límite de presupuesto excedido, token duplicado o datos inválidos."},
+        403: {"description": "Acceso denegado. No autorizado."}
+    }
+)
 async def create_beneficiary(
     item: BeneficiarySchema,
     request: Request,
@@ -1330,7 +1423,18 @@ async def create_beneficiary(
         }
     }
 
-@app.put("/api/admin/beneficiaries/{user_id}")
+@app.put(
+    "/api/admin/beneficiaries/{user_id}",
+    summary="Modificar Beneficiario Social Pay",
+    description="Actualiza la información y saldo disponible de un beneficiario existente. Valida de forma estricta los límites del presupuesto asignado y verifica que el beneficiario pertenezca al gestor que realiza la petición (prevención IDOR).",
+    tags=["[GESTOR] Acción Social"],
+    responses={
+        200: {"description": "Beneficiario actualizado con éxito."},
+        400: {"description": "Límite de presupuesto excedido, token en uso o datos inválidos."},
+        403: {"description": "Acceso denegado. Intento de modificar un beneficiario ajeno (IDOR) o privilegios insuficientes."},
+        404: {"description": "Beneficiario no encontrado."}
+    }
+)
 async def update_beneficiary(
     user_id: str,
     item: BeneficiarySchema,
@@ -1432,7 +1536,18 @@ async def update_beneficiary(
         }
     }
 
-@app.delete("/api/admin/beneficiaries/{user_id}")
+@app.delete(
+    "/api/admin/beneficiaries/{user_id}",
+    summary="Eliminar Beneficiario Social Pay",
+    description="Elimina un beneficiario de la base de datos y restituye de forma correspondiente el presupuesto consumido al gestor en una transacción atómica. Protegido contra IDOR.",
+    tags=["[GESTOR] Acción Social"],
+    responses={
+        200: {"description": "Beneficiario eliminado y presupuesto reintegrado con éxito."},
+        400: {"description": "Error al procesar la eliminación en base de datos."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes o el beneficiario no pertenece al gestor."},
+        404: {"description": "Beneficiario no encontrado."}
+    }
+)
 async def delete_beneficiary(
     user_id: str,
     request: Request,
@@ -1484,7 +1599,16 @@ async def delete_beneficiary(
 
 # 2. Endpoints de Personal del Sistema (CRUD)
 
-@app.get("/api/admin/system-users")
+@app.get(
+    "/api/admin/system-users",
+    summary="Listar Usuarios de Personal del Sistema",
+    description="Obtiene el listado completo de usuarios con roles de administración, supervisión o supermercado. Exclusivo para rol 'admin'.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Listado de usuarios del sistema recuperado con éxito."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes."}
+    }
+)
 async def list_system_users(
     request: Request,
     db: Session = Depends(get_db)
@@ -1505,7 +1629,17 @@ async def list_system_users(
         ]
     }
 
-@app.post("/api/admin/system-users")
+@app.post(
+    "/api/admin/system-users",
+    summary="Crear Usuario de Personal del Sistema",
+    description="Crea una cuenta nueva para el personal del sistema (admin, upspain, gestor, supermercado). Inicializa el secreto MFA para su posterior vinculación obligatoria. Exclusivo para administradores.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Usuario creado con éxito, incluyendo secreto MFA inicial."},
+        400: {"description": "Campos requeridos vacíos, rol no válido o email ya registrado."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes."}
+    }
+)
 async def create_system_user(
     item: SystemUserCreateSchema,
     request: Request,
@@ -1552,7 +1686,18 @@ async def create_system_user(
         }
     }
 
-@app.put("/api/admin/system-users/{user_id}")
+@app.put(
+    "/api/admin/system-users/{user_id}",
+    summary="Modificar Usuario de Personal del Sistema",
+    description="Actualiza el email, rol o contraseña (con hash PBKDF2) de un usuario de personal. Exclusivo para administradores.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Usuario de personal modificado con éxito."},
+        400: {"description": "Campos obligatorios vacíos, rol no válido o email duplicado."},
+        403: {"description": "Acceso denegado. Privilegios insuficientes."},
+        404: {"description": "Usuario no encontrado."}
+    }
+)
 async def update_system_user(
     user_id: str,
     item: SystemUserUpdateSchema,
@@ -1599,7 +1744,18 @@ async def update_system_user(
         }
     }
 
-@app.delete("/api/admin/system-users/{user_id}")
+@app.delete(
+    "/api/admin/system-users/{user_id}",
+    summary="Eliminar Usuario de Personal del Sistema",
+    description="Elimina una cuenta de personal del sistema. Previene la auto-eliminación del administrador que ejecuta la acción. Exclusivo para administradores.",
+    tags=["[ADMIN] Administración Global"],
+    responses={
+        200: {"description": "Usuario eliminado con éxito."},
+        400: {"description": "Intento de auto-eliminación no permitido."},
+        403: {"description": "Acceso denegado. Privilegios de administrador requeridos."},
+        404: {"description": "Usuario no encontrado."}
+    }
+)
 async def delete_system_user(
     user_id: str,
     request: Request,
@@ -1623,7 +1779,17 @@ async def delete_system_user(
 
 # 3. Endpoints de Asignación de Fondos y Portales de Dashboard
 
-@app.post("/api/upspain/asignar-fondos")
+@app.post(
+    "/api/upspain/asignar-fondos",
+    summary="Asignar Presupuesto FSE+ a Gestor",
+    description="Permite al supervisor financiero (Up Spain) asignar presupuesto a un gestor social asociado a un proyecto específico de fondos FSE+. Valida tasas de cofinanciación y crea un registro de asignación financiera. Si la asignación existe, la actualiza.",
+    tags=["[UP SPAIN] Supervisor Financiero"],
+    responses={
+        200: {"description": "Presupuesto asignado o actualizado con éxito."},
+        400: {"description": "El gestor especificado no existe o no tiene el rol correspondiente."},
+        403: {"description": "Acceso denegado. Solo accesible por el rol 'upspain'."}
+    }
+)
 async def asignar_fondos(
     item: AsignarFondosSchema,
     request: Request,
@@ -1684,7 +1850,16 @@ async def asignar_fondos(
             }
         }
 
-@app.get("/api/supermercado/dashboard-data")
+@app.get(
+    "/api/supermercado/dashboard-data",
+    summary="Obtener Datos de Facturación de Supermercado",
+    description="Recupera la lista de productos asociados, transacciones (ventas) aprobadas y métricas KPI de facturación acumulada para el supermercado autenticado.",
+    tags=["[SUPERMERCADO] Catálogos"],
+    responses={
+        200: {"description": "Datos y métricas del dashboard de supermercado obtenidos con éxito."},
+        403: {"description": "Acceso denegado. Sesión no válida o rol incorrecto."}
+    }
+)
 async def get_supermercado_dashboard_data(
     request: Request,
     db: Session = Depends(get_db)
@@ -1725,7 +1900,16 @@ async def get_supermercado_dashboard_data(
         }
     }
 
-@app.get("/api/gestor/dashboard-data")
+@app.get(
+    "/api/gestor/dashboard-data",
+    summary="Obtener Datos de Gestión de Acción Social",
+    description="Recupera los beneficiarios asignados, proyectos FSE+ activos con sus presupuestos totales y consumidos, así como el historial de compras para el gestor autenticado.",
+    tags=["[GESTOR] Acción Social"],
+    responses={
+        200: {"description": "Datos de gestión del gestor obtenidos con éxito."},
+        403: {"description": "Acceso denegado. Privilegios del rol 'gestor' requeridos."}
+    }
+)
 async def get_gestor_dashboard_data(
     request: Request,
     db: Session = Depends(get_db)
@@ -1784,7 +1968,16 @@ async def get_gestor_dashboard_data(
         ]
     }
 
-@app.get("/api/upspain/dashboard-data")
+@app.get(
+    "/api/upspain/dashboard-data",
+    summary="Obtener Datos del Supervisor Financiero",
+    description="Recupera el listado de gestores, asignaciones de fondos globales, transacciones realizadas en la plataforma y métricas KPI agregadas de consumo de presupuesto. Exclusivo para 'upspain'.",
+    tags=["[UP SPAIN] Supervisor Financiero"],
+    responses={
+        200: {"description": "Datos de supervisión global obtenidos con éxito."},
+        403: {"description": "Acceso denegado. Privilegios de supervisor requeridos."}
+    }
+)
 async def get_upspain_dashboard_data(
     request: Request,
     db: Session = Depends(get_db)
@@ -1840,7 +2033,13 @@ async def get_upspain_dashboard_data(
 from fastapi.responses import RedirectResponse
 import urllib.parse
 
-@app.get("/admin/login", response_class=HTMLResponse)
+@app.get(
+    "/admin/login",
+    response_class=HTMLResponse,
+    summary="Página de Inicio de Sesión de Personal",
+    description="Renderiza el formulario de inicio de sesión para el personal de administración y supervisores. Si la sesión ya es válida y tiene MFA verificado, redirige al dashboard correspondiente.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def login_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     # Si ya tiene sesión autenticada y verificada por MFA, redirigir directo al dashboard
     session_token = request.cookies.get("session_token")
@@ -1862,7 +2061,12 @@ async def login_page(request: Request, error: Optional[str] = None, db: Session 
         context={"request": request, "state": "login", "error": error}
     )
 
-@app.post("/admin/login")
+@app.post(
+    "/admin/login",
+    summary="Procesar Credenciales de Personal",
+    description="Valida las credenciales de email y contraseña (hash PBKDF2) del personal. Si son correctas, crea una sesión temporal no verificada y redirige a la configuración o verificación de MFA.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def process_login(
     request: Request,
     email: str = Form(...),
@@ -1907,7 +2111,13 @@ async def process_login(
             status_code=303
         )
 
-@app.get("/admin/setup-mfa", response_class=HTMLResponse)
+@app.get(
+    "/admin/setup-mfa",
+    response_class=HTMLResponse,
+    summary="Página de Vinculación de MFA",
+    description="Renderiza el código QR y la clave secreta para vincular la aplicación de autenticación TOTP (Google Authenticator/Authy) en el primer inicio de sesión.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
     if not session_token or session_token not in ADMIN_SESSIONS:
@@ -1938,7 +2148,12 @@ async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Sess
         }
     )
 
-@app.post("/admin/setup-mfa")
+@app.post(
+    "/admin/setup-mfa",
+    summary="Verificar y Activar MFA",
+    description="Recibe el código TOTP inicial para verificar y activar de forma permanente el segundo factor de autenticación (MFA) para la cuenta de personal.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def process_setup_mfa(
     request: Request,
     code: str = Form(...),
@@ -1987,7 +2202,13 @@ async def process_setup_mfa(
             status_code=303
         )
 
-@app.get("/admin/verify-mfa", response_class=HTMLResponse)
+@app.get(
+    "/admin/verify-mfa",
+    response_class=HTMLResponse,
+    summary="Página de Verificación de MFA",
+    description="Renderiza la interfaz para introducir el código de 6 dígitos del segundo factor de autenticación (MFA) en los accesos recurrentes.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
     if not session_token or session_token not in ADMIN_SESSIONS:
@@ -2011,7 +2232,12 @@ async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Ses
         context={"request": request, "state": "verify", "error": error}
     )
 
-@app.post("/admin/verify-mfa")
+@app.post(
+    "/admin/verify-mfa",
+    summary="Procesar Verificación de MFA",
+    description="Verifica el código de un solo uso TOTP. Si es correcto, marca la sesión como verificada por MFA y amplía su expiración, redirigiendo al dashboard respectivo.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def process_verify_mfa(
     request: Request,
     code: str = Form(...),
@@ -2055,7 +2281,12 @@ async def process_verify_mfa(
             status_code=303
         )
 
-@app.get("/admin/logout")
+@app.get(
+    "/admin/logout",
+    summary="Cerrar Sesión de Personal",
+    description="Invalida el token de sesión de personal en la memoria del servidor y elimina la cookie de sesión del navegador, redirigiendo al login.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def logout(request: Request):
     session_token = request.cookies.get("session_token")
     if session_token:
@@ -2064,7 +2295,13 @@ async def logout(request: Request):
     response.delete_cookie("session_token")
     return response
 
-@app.get("/admin/dashboard", response_class=HTMLResponse)
+@app.get(
+    "/admin/dashboard",
+    response_class=HTMLResponse,
+    summary="Dashboard de Administración Global",
+    description="Renderiza la interfaz de control global para administradores del sistema. Requiere sesión y rol 'admin' verificado.",
+    tags=["[ADMIN] Administración Global"]
+)
 async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     admin = await get_current_admin(request, db)
     if not admin:
@@ -2073,7 +2310,13 @@ async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     html_path = BASE_DIR / "templates" / "dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
-@app.get("/upspain/dashboard", response_class=HTMLResponse)
+@app.get(
+    "/upspain/dashboard",
+    response_class=HTMLResponse,
+    summary="Dashboard de Supervisor Financiero (Up Spain)",
+    description="Renderiza la interfaz de supervisión de presupuestos y asignaciones financieras para Up Spain. Requiere rol 'upspain' verificado.",
+    tags=["[UP SPAIN] Supervisor Financiero"]
+)
 async def upspain_dashboard(request: Request, db: Session = Depends(get_db)):
     user = await get_current_upspain(request, db)
     if not user:
@@ -2082,7 +2325,13 @@ async def upspain_dashboard(request: Request, db: Session = Depends(get_db)):
     html_path = BASE_DIR / "templates" / "upspain_dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
-@app.get("/gestor/dashboard", response_class=HTMLResponse)
+@app.get(
+    "/gestor/dashboard",
+    response_class=HTMLResponse,
+    summary="Dashboard de Acción Social (Gestor)",
+    description="Renderiza la interfaz de administración de beneficiarios y proyectos para los gestores de los fondos. Requiere rol 'gestor' verificado.",
+    tags=["[GESTOR] Acción Social"]
+)
 async def gestor_dashboard(request: Request, db: Session = Depends(get_db)):
     user = await get_current_gestor(request, db)
     if not user:
@@ -2091,7 +2340,13 @@ async def gestor_dashboard(request: Request, db: Session = Depends(get_db)):
     html_path = BASE_DIR / "templates" / "gestor_dashboard.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
-@app.get("/supermercado/dashboard", response_class=HTMLResponse)
+@app.get(
+    "/supermercado/dashboard",
+    response_class=HTMLResponse,
+    summary="Dashboard de Mantenimiento de Supermercado",
+    description="Renderiza la interfaz de gestión de referencias y cargas masivas de productos para el supermercado. Requiere rol 'supermercado' verificado.",
+    tags=["[SUPERMERCADO] Catálogos"]
+)
 async def supermercado_dashboard(request: Request, db: Session = Depends(get_db)):
     user = await get_current_supermercado(request, db)
     if not user:
