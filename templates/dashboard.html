@@ -332,6 +332,17 @@
     </div>
 
     <script>
+        // Helper para llamadas seguras y auto-redirección si la sesión expira (HTTP 403)
+        async function apiFetch(url, options = {}) {
+            const response = await fetch(url, options);
+            if (response.status === 403) {
+                alert('Tu sesión ha expirado o no está autorizada. Redirigiendo al inicio de sesión...');
+                window.location.href = '/admin/login';
+                throw new Error('Unauthorized');
+            }
+            return response;
+        }
+
         // ── Tab switching ─────────────────────────────────────────────────────
         function showTab(tab) {
             document.getElementById('panel-audit').style.display   = tab === 'audit'   ? 'block' : 'none';
@@ -353,7 +364,7 @@
         async function loadBeneficiaries() {
             const tbody = document.getElementById('beneficiaries-body');
             try {
-                const response = await fetch('/api/admin/beneficiaries');
+                const response = await apiFetch('/api/admin/beneficiaries');
                 const data = await response.json();
                 if (!data.beneficiaries || data.beneficiaries.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay beneficiarios registrados.</td></tr>';
@@ -433,7 +444,7 @@
             const method = id ? 'PUT' : 'POST';
 
             try {
-                const response = await fetch(url, {
+                const response = await apiFetch(url, {
                     method: method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -454,7 +465,7 @@
         async function deleteBeneficiary(id, token) {
             if (!confirm(`¿Estás seguro de que deseas eliminar al beneficiario con token "${token}"?`)) return;
             try {
-                const response = await fetch(`/api/admin/beneficiaries/${id}`, { method: 'DELETE' });
+                const response = await apiFetch(`/api/admin/beneficiaries/${id}`, { method: 'DELETE' });
                 const data = await response.json();
                 if (response.ok) {
                     loadBeneficiaries();
@@ -471,7 +482,7 @@
         async function loadSystemUsers() {
             const tbody = document.getElementById('system-users-body');
             try {
-                const response = await fetch('/api/admin/system-users');
+                const response = await apiFetch('/api/admin/system-users');
                 const data = await response.json();
                 if (!data.users || data.users.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay personal registrado.</td></tr>';
@@ -559,7 +570,7 @@
             const method = id ? 'PUT' : 'POST';
 
             try {
-                const response = await fetch(url, {
+                const response = await apiFetch(url, {
                     method: method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -580,7 +591,7 @@
         async function deleteStaff(id, email) {
             if (!confirm(`¿Estás seguro de que deseas eliminar al usuario "${email}"?`)) return;
             try {
-                const response = await fetch(`/api/admin/system-users/${id}`, { method: 'DELETE' });
+                const response = await apiFetch(`/api/admin/system-users/${id}`, { method: 'DELETE' });
                 const data = await response.json();
                 if (response.ok) {
                     loadSystemUsers();
@@ -596,7 +607,7 @@
         // ── Auditoría ─────────────────────────────────────────────────────────
         async function fetchLogs() {
             try {
-                const response = await fetch('/api/admin/audit-logs');
+                const response = await apiFetch('/api/admin/audit-logs');
                 const data = await response.json();
                 const tbody = document.getElementById('logs-body');
                 if (data.logs.length === 0) {
@@ -637,7 +648,7 @@
         async function loadProducts() {
             const super_ = document.getElementById('filter-super').value;
             const url = '/api/admin/products' + (super_ ? `?supermarket=${super_}` : '');
-            const data = await (await fetch(url)).json();
+            const data = await (await apiFetch(url)).json();
             allProducts = data.products || [];
             document.getElementById('catalog-count').textContent = `${allProducts.length} productos en el catálogo`;
             renderProducts(allProducts);
@@ -673,7 +684,7 @@
 
         async function deleteProduct(barcode) {
             if (!confirm('¿Eliminar este producto del catálogo?')) return;
-            await fetch(`/api/admin/products/${barcode}`, { method: 'DELETE' });
+            await apiFetch(`/api/admin/products/${barcode}`, { method: 'DELETE' });
             loadProducts();
         }
 
@@ -684,7 +695,7 @@
             e.preventDefault();
             const fd = new FormData(e.target);
             fd.set('allowed', document.getElementById('f-allowed').value === 'true');
-            const r = await fetch('/api/admin/products', { method: 'POST', body: fd });
+            const r = await apiFetch('/api/admin/products', { method: 'POST', body: fd });
             const data = await r.json();
             if (data.status === 'ok') { closeAddModal(); loadProducts(); }
             else alert('Error: ' + JSON.stringify(data));
