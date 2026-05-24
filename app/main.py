@@ -1,7 +1,16 @@
-from fastapi import FastAPI, Request, File, UploadFile, Form, Query, Depends
+from fastapi import FastAPI, Request, File, UploadFile, Form, Query, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import logging
+
+# Configure security logger for compliance audits and Pentesting
+security_logger = logging.getLogger("security")
+security_logger.setLevel(logging.WARNING)
+if not security_logger.handlers:
+    sh = logging.StreamHandler()
+    sh.setFormatter(logging.Formatter("[SECURITY LOG] %(asctime)s - %(message)s"))
+    security_logger.addHandler(sh)
 from pathlib import Path
 import shutil
 import sys
@@ -65,10 +74,26 @@ async def get_current_user_by_roles(request: Request, allowed_roles: List[str], 
         return None
         
     user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
-    if not user or user.rol not in allowed_roles:
+    if not user:
         return None
         
+    if user.rol not in allowed_roles:
+        # Resolve user identifier (anonymous token if exists, else id)
+        anon_id = user.token_anonimo if user.token_anonimo else str(user.id)
+        # Log to security logger
+        security_logger.warning(
+            f"Violacion de acceso detectada. Usuario AnonID: {anon_id}, Rol: '{user.rol}', Ruta: '{request.url.path}', Rol requerido: {allowed_roles}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Privilegios insuficientes."
+        )
+        
     return user
+
+async def get_current_user_with_role(request: Request, allowed_roles: List[str], db: Session = Depends(get_db)):
+    """Dependencia explicativa de RBAC para validación obligatoria de rol antes de ejecutar lógica."""
+    return await get_current_user_by_roles(request, allowed_roles, db)
 
 async def get_current_admin(request: Request, db: Session = Depends(get_db)):
     return await get_current_user_by_roles(request, ["admin"], db)
@@ -720,18 +745,22 @@ class SupermarketProductSchema(BaseModel):
 async def add_or_update_supermarket_product(
     item: SupermarketProductSchema,
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_supermercado)
 ):
     """
     Mantenimiento individual por pantalla para añadir o actualizar un producto del supermercado.
     Exclusivo para el rol 'supermercado'.
     """
-    # Verificación de rol: cabecera X-Role o query param 'role' para facilitar pruebas
-    x_role = request.headers.get("X-Role") or request.query_params.get("role")
-    if x_role != "supermercado":
-        return JSONResponse(
+    # Evitar IDOR (Insecure Direct Object Reference)
+    user_supermarket_id = current_user.email.split('@')[0]
+    if item.supermercado_id != user_supermarket_id:
+        security_logger.warning(
+            f"Intento de IDOR detectado. Supermercado '{user_supermarket_id}' intento modificar catalogo de '{item.supermercado_id}'"
+        )
+        raise HTTPException(
             status_code=403,
-            content={"error": "Acceso denegado. Se requiere el rol 'supermercado'."}
+            detail="Acceso denegado. No autorizado a modificar este supermercado."
         )
 
     # Validaciones de entrada
@@ -785,19 +814,23 @@ async def upload_batch_products(
     request: Request,
     supermercado_id: str = Form(...),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_supermercado)
 ):
     """
     Carga masiva (batch) de productos mediante un archivo CSV.
     Procesa línea por línea, valida datos y actualiza de golpe (Bulk Update/Insert).
     Exclusivo para el rol 'supermercado'.
     """
-    # Verificación de rol
-    x_role = request.headers.get("X-Role") or request.query_params.get("role")
-    if x_role != "supermercado":
-        return JSONResponse(
-            status_code=403,
-            content={"error": "Acceso denegado. Se requiere el rol 'supermercado'."}
+    # Evitar IDOR (Insecure Direct Object Reference)
+    user_supermarket_id = current_user.email.split('@')[0]
+    if supermercado_id != user_supermarket_id:
+        security_logger.warning(
+            f"Intento de IDOR detectado. Supermercado '{user_supermarket_id}' intento realizar carga masiva para '{supermercado_id}'"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado. No autorizado a modificar este supermercado."
         )
 
     if not file.filename.endswith('.csv'):
@@ -874,6 +907,16 @@ async def upload_batch_products(
             barcode = raw_barcode.strip()
             nombre = raw_name.strip()
             categoria_fse = raw_category.strip() if raw_category else None
+
+            # EAN barcode sanitization and validation (must be only digits)
+            if not re.match(r'^\d+$', barcode):
+                warnings.append(f"Fila {idx}: Código de barras '{raw_barcode}' inválido (solo se permiten números), fila omitida.")
+                continue
+
+            # Product name sanitization and validation (prevent SQL injection and XSS)
+            if not re.match(r'^[\w\s\d.,\-()áéíóúÁÉÍÓÚñÑüÜ%/]+$', nombre):
+                warnings.append(f"Fila {idx}: Nombre de producto '{raw_name}' contiene caracteres sospechosos o inválidos, fila omitida.")
+                continue
 
             # Parsear palabras clave (separadas por coma o punto y coma)
             keywords = []
@@ -1021,6 +1064,48 @@ async def upload_ticket(
             content={"error": "Acceso denegado. Beneficiario no autenticado."}
         )
 
+    # 1. Parse virtual cart items
+    try:
+        parsed_cart_items = json.loads(cart_items)
+    except json.JSONDecodeError:
+        parsed_cart_items = []
+
+    # Recalculate cart total using database prices only (prevention of total price manipulation)
+    recalculated_total = 0.0
+    for item in parsed_cart_items:
+        barcode = item.get("barcode")
+        db_price = None
+        if barcode:
+            # Look up in the database for the given supermarket
+            local_prod = db.query(PSModel).filter(
+                PSModel.supermercado_id == supermarket,
+                PSModel.codigo_barras == barcode
+            ).first()
+            if local_prod:
+                db_price = float(local_prod.precio)
+            else:
+                # If not found locally, check if global lookup finds it
+                global_prod = db_get_by_barcode(barcode)
+                if global_prod and global_prod.get("price_ref") is not None:
+                    db_price = float(global_prod["price_ref"])
+                else:
+                    # Look up in SEED_CATALOG
+                    for b, n, c in SEED_CATALOG:
+                        if b == barcode:
+                            db_price = 1.00 # fallback price for seed catalog items
+                            break
+                            
+        # Override item price with resolved db_price if found
+        if db_price is not None:
+            item["price"] = db_price
+        else:
+            db_price = float(item.get("price", 0.0))
+            
+        recalculated_total += db_price
+        
+    # Ignore frontend-sent total, set to recalculated sum
+    cart_total = recalculated_total
+
     # Validar que no supere el saldo disponible en base de datos
     if float(user.saldo_disponible) < cart_total:
         return JSONResponse(
@@ -1031,12 +1116,6 @@ async def upload_ticket(
     file_path = UPLOAD_DIR / ticket.filename
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(ticket.file, buffer)
-
-    # 1. Parse virtual cart items
-    try:
-        parsed_cart_items = json.loads(cart_items)
-    except json.JSONDecodeError:
-        parsed_cart_items = []
 
     # 2. Try Gemini OCR
     ticket_data, debug_error = ocr_ticket_via_gemini(file_path, parsed_cart_items, supermarket)
@@ -1265,6 +1344,15 @@ async def update_beneficiary(
     user = db.query(UserModel).filter(UserModel.id == user_id, UserModel.rol == "beneficiario").first()
     if not user:
         return JSONResponse(status_code=404, content={"error": "Beneficiario no encontrado."})
+        
+    if current_user.rol == "gestor" and user.gestor_uuid != current_user.id:
+        security_logger.warning(
+            f"Intento de IDOR detectado. Gestor {current_user.id} intento modificar beneficiario {user.id} perteneciente al gestor {user.gestor_uuid}."
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Este beneficiario no pertenece a tu gestion."
+        )
         
     token_val = item.token_anonimo.strip()
     if not token_val:
