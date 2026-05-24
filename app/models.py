@@ -67,6 +67,7 @@ class Usuario(Base):
     # Campos para relaciones presupuestarias y compliance
     gestor_uuid = Column(GUID(), ForeignKey('usuarios.id', ondelete='SET NULL'), nullable=True)
     codigo_proyecto_fse = Column(String, nullable=True) # Proyecto FSE asignado para beneficiarios
+    creado_por = Column(GUID(), ForeignKey('usuarios.id', ondelete='SET NULL'), nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

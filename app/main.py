@@ -261,7 +261,7 @@ def init_db():
         recreate_needed = False
         if has_table_users:
             columns = [c["name"] for c in inspector.get_columns("usuarios")]
-            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled", "gestor_uuid", "codigo_proyecto_fse"]
+            required = ["email", "hashed_password", "mfa_secret", "mfa_enabled", "gestor_uuid", "codigo_proyecto_fse", "creado_por"]
             missing = [col for col in required if col not in columns]
             if missing:
                 print(f"[DB] Columnas faltantes en 'usuarios': {missing}.")
@@ -1281,6 +1281,10 @@ class AsignarFondosSchema(BaseModel):
     presupuesto_total: float
     tasa_cofinanciacion: float
 
+class GestorCreateSchema(BaseModel):
+    email: str
+    password: str
+
 # 1. Endpoints de Beneficiarios (CRUD)
 
 @app.get(
@@ -1849,6 +1853,62 @@ async def asignar_fondos(
                 "tasa_cofinanciacion": float(new_alloc.tasa_cofinanciacion)
             }
         }
+
+@app.post(
+    "/api/upspain/crear-gestor",
+    summary="Crear Perfil de Gestor Social",
+    description="Permite a un supervisor de Up Spain crear una nueva cuenta para un Gestor Social. Registra de forma obligatoria la trazabilidad de auditoría, incluyendo el ID del supervisor de Up Spain (`creado_por`) y el timestamp actual. Ningún otro rol puede invocar este endpoint o alterar estos datos.",
+    tags=["[UP SPAIN] Supervisor Financiero"],
+    responses={
+        200: {"description": "Gestor creado con éxito con su trazabilidad de auditoría."},
+        400: {"description": "Datos de entrada incorrectos, correo ya registrado o contraseña no válida."},
+        403: {"description": "Acceso denegado. Privilegios de Up Spain requeridos."}
+    }
+)
+async def crear_gestor(
+    item: GestorCreateSchema,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    current_user = await get_current_upspain(request, db)
+    if not current_user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    email_val = item.email.strip()
+    password_val = item.password.strip()
+    
+    if not email_val or not password_val:
+        return JSONResponse(status_code=400, content={"error": "Todos los campos son obligatorios."})
+        
+    existing = db.query(UserModel).filter(UserModel.email == email_val).first()
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Este correo electrónico ya está registrado."})
+        
+    # Crear gestor con auditoria obligatoria FSE+ (creado_por y timestamp)
+    new_gestor = UserModel(
+        token_anonimo=f"GESTOR-TOKEN-{secrets.token_hex(4).upper()}",
+        email=email_val,
+        hashed_password=hash_password(password_val),
+        rol="gestor",
+        mfa_secret=pyotp.random_base32(),
+        mfa_enabled=False,
+        creado_por=current_user.id,
+        created_at=datetime.utcnow()
+    )
+    db.add(new_gestor)
+    db.commit()
+    db.refresh(new_gestor)
+    
+    return {
+        "status": "created",
+        "gestor": {
+            "id": str(new_gestor.id),
+            "email": new_gestor.email,
+            "rol": new_gestor.rol,
+            "creado_por": str(new_gestor.creado_por),
+            "created_at": new_gestor.created_at.isoformat()
+        }
+    }
 
 @app.get(
     "/api/supermercado/dashboard-data",
