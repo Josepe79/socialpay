@@ -203,6 +203,19 @@
             }
         }
 
+        .horizontal-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 32px;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .horizontal-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .panel {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -520,110 +533,109 @@
         </div>
     </div>
 
-    <!-- MAIN GRID LAYOUT -->
-    <div class="main-layout">
-        <!-- SIDEBAR: FORM & PROJECT POOLS -->
-        <div style="display: flex; flex-direction: column; gap: 32px;">
-            <!-- PROYECTOS ACTIVOS -->
-            <div class="panel">
-                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
-                    <div class="panel-title-left">
-                        <span class="panel-title-icon">📂</span>
-                        <span>Límites FSE+ por Proyecto</span>
-                    </div>
-                    <span class="step-badge">Paso 1</span>
+    <!-- SECCIÓN DE ACCIONES (LÍMITES Y FORMULARIO EN PARALELO) -->
+    <div class="horizontal-row" style="margin-bottom: 32px;">
+        <!-- PROYECTOS ACTIVOS -->
+        <div class="panel">
+            <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div class="panel-title-left">
+                    <span class="panel-title-icon">📂</span>
+                    <span>Límites FSE+ por Proyecto</span>
                 </div>
-                <div class="panel-subtitle">Revise sus límites y códigos de proyectos FSE+ aprobados por Up Spain.</div>
-                <div style="display: flex; flex-direction: column; gap: 12px;" id="projects-list-container">
-                    <div class="empty-state">No hay presupuestos FSE+ vinculados.</div>
-                </div>
+                <span class="step-badge">Paso 1</span>
             </div>
-
-            <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
-            <div class="panel">
-                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
-                    <div class="panel-title-left">
-                        <span class="panel-title-icon" id="form-icon">👤</span>
-                        <span id="form-title">Registrar Beneficiario</span>
-                    </div>
-                    <span class="step-badge">Paso 2</span>
-                </div>
-                <div class="panel-subtitle">Asigne saldo a un beneficiario vinculándolo a uno de los códigos de proyecto activos.</div>
-                <form id="beneficiary-form">
-                    <input type="hidden" id="edit-user-id" value="">
-                    <div class="form-group">
-                        <label for="token_anonimo">Token Anónimo (Código RGPD)</label>
-                        <input type="text" id="token_anonimo" name="token_anonimo" placeholder="Ej: AS-2026-X89" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="codigo_proyecto_fse">Proyecto FSE+ Asociado</label>
-                        <select id="codigo_proyecto_fse" name="codigo_proyecto_fse" required>
-                            <option value="">Cargando proyectos...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="saldo_disponible">Saldo Disponible (€)</label>
-                        <input type="number" step="0.01" id="saldo_disponible" name="saldo_disponible" placeholder="Ej: 150.00" required>
-                    </div>
-                    <button type="submit" class="btn-submit" id="btn-submit-text">Crear Beneficiario</button>
-                    <button type="button" class="btn-cancel" id="btn-cancel-edit">Cancelar Edición</button>
-                </form>
+            <div class="panel-subtitle">Revise sus límites y códigos de proyectos FSE+ aprobados por Up Spain.</div>
+            <div style="display: flex; flex-direction: column; gap: 12px;" id="projects-list-container">
+                <div class="empty-state">No hay presupuestos FSE+ vinculados.</div>
             </div>
         </div>
 
-        <!-- MAIN CONTENT: BENEFICIARIES TABLE & TRANSACTIONS -->
-        <div style="display: flex; flex-direction: column; gap: 32px;">
-            <div class="panel">
-                <div class="panel-title">
-                    <div class="panel-title-left">
-                        <span class="panel-title-icon">👥</span>
-                        <span>Beneficiarios Activos en tus Proyectos</span>
-                    </div>
+        <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
+        <div class="panel">
+            <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div class="panel-title-left">
+                    <span class="panel-title-icon" id="form-icon">👤</span>
+                    <span id="form-title">Registrar Beneficiario</span>
                 </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Token Anónimo</th>
-                                <th>Proyecto FSE+</th>
-                                <th>Saldo Asignado</th>
-                                <th style="text-align: right;">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="beneficiaries-table-body">
-                            <tr>
-                                <td colspan="4" class="empty-state">Cargando beneficiarios...</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <span class="step-badge">Paso 2</span>
+            </div>
+            <div class="panel-subtitle">Asigne saldo a un beneficiario vinculándolo a uno de los códigos de proyecto activos.</div>
+            <form id="beneficiary-form">
+                <input type="hidden" id="edit-user-id" value="">
+                <div class="form-group">
+                    <label for="token_anonimo">Token Anónimo (Código RGPD)</label>
+                    <input type="text" id="token_anonimo" name="token_anonimo" placeholder="Ej: AS-2026-X89" required>
+                </div>
+                <div class="form-group">
+                    <label for="codigo_proyecto_fse">Proyecto FSE+ Asociado</label>
+                    <select id="codigo_proyecto_fse" name="codigo_proyecto_fse" required>
+                        <option value="">Cargando proyectos...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="saldo_disponible">Saldo Disponible (€)</label>
+                    <input type="number" step="0.01" id="saldo_disponible" name="saldo_disponible" placeholder="Ej: 150.00" required>
+                </div>
+                <button type="submit" class="btn-submit" id="btn-submit-text">Crear Beneficiario</button>
+                <button type="button" class="btn-cancel" id="btn-cancel-edit">Cancelar Edición</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SECCIÓN DE DATOS (TABLAS EN PARALELO) -->
+    <div class="horizontal-row">
+        <!-- TABLA BENEFICIARIOS -->
+        <div class="panel">
+            <div class="panel-title">
+                <div class="panel-title-left">
+                    <span class="panel-title-icon">👥</span>
+                    <span>Beneficiarios Activos en tus Proyectos</span>
                 </div>
             </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Token Anónimo</th>
+                            <th>Proyecto FSE+</th>
+                            <th>Saldo Asignado</th>
+                            <th style="text-align: right;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="beneficiaries-table-body">
+                        <tr>
+                            <td colspan="4" class="empty-state">Cargando beneficiarios...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
 
-            <div class="panel">
-                <div class="panel-title">
-                    <div class="panel-title-left">
-                        <span class="panel-title-icon">🧾</span>
-                        <span>Historial de Compras de tus Beneficiarios</span>
-                    </div>
+        <!-- TABLA TRANSACCIONES -->
+        <div class="panel">
+            <div class="panel-title">
+                <div class="panel-title-left">
+                    <span class="panel-title-icon">🧾</span>
+                    <span>Historial de Compras de tus Beneficiarios</span>
                 </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Beneficiario</th>
-                                <th>Supermercado</th>
-                                <th>Importe</th>
-                                <th>Fecha y Hora</th>
-                                <th>Estado</th>
-                            </tr>
-                        </thead>
-                        <tbody id="transactions-table-body">
-                            <tr>
-                                <td colspan="5" class="empty-state">Cargando compras...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Beneficiario</th>
+                            <th>Supermercado</th>
+                            <th>Importe</th>
+                            <th>Fecha y Hora</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactions-table-body">
+                        <tr>
+                            <td colspan="5" class="empty-state">Cargando compras...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

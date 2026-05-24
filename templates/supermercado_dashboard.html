@@ -199,6 +199,19 @@
             }
         }
 
+        .horizontal-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 32px;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .horizontal-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .panel {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -456,133 +469,132 @@
         </div>
     </div>
 
-    <!-- MAIN GRID LAYOUT -->
-    <div class="main-layout">
-        <!-- SIDEBAR: PRODUCT FORMS & CSV IMPORT -->
-        <div style="display: flex; flex-direction: column; gap: 32px;">
-            <!-- FORMULARIO DE PRODUCTO -->
-            <div class="panel">
-                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span class="panel-title-icon">🏷️</span>
-                        <span>Guardar Producto</span>
-                    </div>
-                    <span class="step-badge">Opción A</span>
+    <!-- SECCIÓN DE ACCIONES (FORMULARIOS EN PARALELO) -->
+    <div class="horizontal-row" style="margin-bottom: 32px;">
+        <!-- FORMULARIO DE PRODUCTO -->
+        <div class="panel">
+            <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="panel-title-icon">🏷️</span>
+                    <span>Guardar Producto</span>
                 </div>
-                <div class="panel-subtitle">Registre o actualice una referencia de producto individual en el catálogo local.</div>
-                <form id="product-form">
-                    <input type="hidden" id="supermercado_id_val" name="supermercado_id" value="">
-                    <div class="form-group">
-                        <label for="codigo_barras">Código de Barras (EAN-13)</label>
-                        <input type="text" id="codigo_barras" name="codigo_barras" placeholder="Ej: 8410000000001" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="nombre">Nombre de Producto</label>
-                        <input type="text" id="nombre" name="nombre" placeholder="Ej: Leche desnatada Hacendado" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="precio">Precio Ref. (€)</label>
-                        <input type="number" step="0.01" id="precio" name="precio" placeholder="Ej: 0.95" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="categoria_fse">Categoría FSE+</label>
-                        <select id="categoria_fse" name="categoria_fse">
-                            <option value="unknown">Desconocida / Básica</option>
-                            <option value="dairy">Lácteos</option>
-                            <option value="beverages">Bebidas (No Alcohol)</option>
-                            <option value="oils">Aceites y Grasas</option>
-                            <option value="grains">Cereales y Arroces</option>
-                            <option value="pasta">Pastas</option>
-                            <option value="bakery">Pan y Bollería</option>
-                            <option value="meat">Carnes y Embutidos</option>
-                            <option value="hygiene">Higiene Personal</option>
-                            <option value="baby">Productos Bebé</option>
-                            <option value="cleaning">Limpieza del Hogar</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="palabras_clave_ocr">Palabras Clave OCR (separadas por comas)</label>
-                        <input type="text" id="palabras_clave_ocr" name="palabras_clave_ocr" placeholder="Ej: LECH, SEMI, HAC">
-                    </div>
-                    <button type="submit" class="btn-submit">Guardar Referencia</button>
-                </form>
+                <span class="step-badge">Opción A</span>
             </div>
-
-            <!-- CARGA CSV MASIVA -->
-            <div class="panel">
-                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span class="panel-title-icon">📤</span>
-                        <span>Carga Masiva (CSV)</span>
-                    </div>
-                    <span class="step-badge" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);">Opción B</span>
+            <div class="panel-subtitle">Registre o actualice una referencia de producto individual en el catálogo local.</div>
+            <form id="product-form">
+                <input type="hidden" id="supermercado_id_val" name="supermercado_id" value="">
+                <div class="form-group">
+                    <label for="codigo_barras">Código de Barras (EAN-13)</label>
+                    <input type="text" id="codigo_barras" name="codigo_barras" placeholder="Ej: 8410000000001" required>
                 </div>
-                <div class="panel-subtitle">Importe o actualice un listado de productos de forma masiva mediante un archivo CSV.</div>
-                <form id="csv-form" enctype="multipart/form-data">
-                    <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:12px;">
-                        Sube un archivo CSV con las columnas <code>codigo_barras</code>, <code>nombre</code> y <code>precio</code> (también admite <code>categoria_fse</code> y <code>palabras_clave_ocr</code>).
-                    </p>
-                    <div class="form-group">
-                        <input type="file" id="csv-file" name="file" accept=".csv" required style="display:none;">
-                        <div class="csv-dropzone" onclick="document.getElementById('csv-file').click()" id="dropzone">
-                            <span>📂 Haz clic para seleccionar archivo CSV</span>
-                            <div style="font-size:0.75rem; margin-top:4px;" id="file-name">Ningún archivo seleccionado</div>
-                        </div>
+                <div class="form-group">
+                    <label for="nombre">Nombre de Producto</label>
+                    <input type="text" id="nombre" name="nombre" placeholder="Ej: Leche desnatada Hacendado" required>
+                </div>
+                <div class="form-group">
+                    <label for="precio">Precio Ref. (€)</label>
+                    <input type="number" step="0.01" id="precio" name="precio" placeholder="Ej: 0.95" required>
+                </div>
+                <div class="form-group">
+                    <label for="categoria_fse">Categoría FSE+</label>
+                    <select id="categoria_fse" name="categoria_fse">
+                        <option value="unknown">Desconocida / Básica</option>
+                        <option value="dairy">Lácteos</option>
+                        <option value="beverages">Bebidas (No Alcohol)</option>
+                        <option value="oils">Aceites y Grasas</option>
+                        <option value="grains">Cereales y Arroces</option>
+                        <option value="pasta">Pastas</option>
+                        <option value="bakery">Pan y Bollería</option>
+                        <option value="meat">Carnes y Embutidos</option>
+                        <option value="hygiene">Higiene Personal</option>
+                        <option value="baby">Productos Bebé</option>
+                        <option value="cleaning">Limpieza del Hogar</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="palabras_clave_ocr">Palabras Clave OCR (separadas por comas)</label>
+                    <input type="text" id="palabras_clave_ocr" name="palabras_clave_ocr" placeholder="Ej: LECH, SEMI, HAC">
+                </div>
+                <button type="submit" class="btn-submit">Guardar Referencia</button>
+            </form>
+        </div>
+
+        <!-- CARGA CSV MASIVA -->
+        <div class="panel">
+            <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="panel-title-icon">📤</span>
+                    <span>Carga Masiva (CSV)</span>
+                </div>
+                <span class="step-badge" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);">Opción B</span>
+            </div>
+            <div class="panel-subtitle">Importe o actualice un listado de productos de forma masiva mediante un archivo CSV.</div>
+            <form id="csv-form" enctype="multipart/form-data">
+                <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:12px;">
+                    Sube un archivo CSV con las columnas <code>codigo_barras</code>, <code>nombre</code> y <code>precio</code> (también admite <code>categoria_fse</code> y <code>palabras_clave_ocr</code>).
+                </p>
+                <div class="form-group">
+                    <input type="file" id="csv-file" name="file" accept=".csv" required style="display:none;">
+                    <div class="csv-dropzone" onclick="document.getElementById('csv-file').click()" id="dropzone">
+                        <span>📂 Haz clic para seleccionar archivo CSV</span>
+                        <div style="font-size:0.75rem; margin-top:4px;" id="file-name">Ningún archivo seleccionado</div>
                     </div>
-                    <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">Subir Lote CSV</button>
-                </form>
+                </div>
+                <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">Subir Lote CSV</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SECCIÓN DE DATOS (TABLAS EN PARALELO) -->
+    <div class="horizontal-row">
+        <!-- TABLA CATÁLOGO -->
+        <div class="panel">
+            <div class="panel-title">
+                <span class="panel-title-icon">📦</span>
+                <span>Referencias del Catálogo Activo</span>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>EAN / Barras</th>
+                            <th>Nombre</th>
+                            <th>Precio</th>
+                            <th>Categoría FSE+</th>
+                            <th>Claves OCR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-table-body">
+                        <tr>
+                            <td colspan="5" class="empty-state">Cargando catálogo...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- MAIN CONTENT: CATALOG TABLE & SALES HISTORY -->
-        <div style="display: flex; flex-direction: column; gap: 32px;">
-            <div class="panel">
-                <div class="panel-title">
-                    <span class="panel-title-icon">📦</span>
-                    <span>Referencias del Catálogo Activo</span>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>EAN / Barras</th>
-                                <th>Nombre</th>
-                                <th>Precio</th>
-                                <th>Categoría FSE+</th>
-                                <th>Claves OCR</th>
-                            </tr>
-                        </thead>
-                        <tbody id="products-table-body">
-                            <tr>
-                                <td colspan="5" class="empty-state">Cargando catálogo...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+        <!-- TABLA VENTAS -->
+        <div class="panel">
+            <div class="panel-title">
+                <span class="panel-title-icon">💸</span>
+                <span>Registro de Ventas y Cobros validados FSE+</span>
             </div>
-
-            <div class="panel">
-                <div class="panel-title">
-                    <span class="panel-title-icon">💸</span>
-                    <span>Registro de Ventas y Cobros validados FSE+</span>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID Cobro</th>
-                                <th>Fecha y Hora</th>
-                                <th>Total Cobrado</th>
-                                <th>Estado</th>
-                            </tr>
-                        </thead>
-                        <tbody id="sales-table-body">
-                            <tr>
-                                <td colspan="4" class="empty-state">Cargando ventas...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID Cobro</th>
+                            <th>Fecha y Hora</th>
+                            <th>Total Cobrado</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sales-table-body">
+                        <tr>
+                            <td colspan="4" class="empty-state">Cargando ventas...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
