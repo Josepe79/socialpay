@@ -225,6 +225,27 @@
             font-size: 1.4rem;
         }
 
+        .step-badge {
+            background: var(--primary-glow);
+            color: var(--primary);
+            border: 1px solid rgba(227, 82, 5, 0.3);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: inline-block;
+        }
+
+        .panel-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-top: -12px;
+            margin-bottom: 8px;
+        }
+
         /* Form elements */
         .form-group {
             display: flex;
@@ -441,10 +462,14 @@
         <div style="display: flex; flex-direction: column; gap: 32px;">
             <!-- FORMULARIO DE PRODUCTO -->
             <div class="panel">
-                <div class="panel-title">
-                    <span class="panel-title-icon">🏷️</span>
-                    <span>Guardar Producto</span>
+                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="panel-title-icon">🏷️</span>
+                        <span>Guardar Producto</span>
+                    </div>
+                    <span class="step-badge">Opción A</span>
                 </div>
+                <div class="panel-subtitle">Registre o actualice una referencia de producto individual en el catálogo local.</div>
                 <form id="product-form">
                     <input type="hidden" id="supermercado_id_val" name="supermercado_id" value="">
                     <div class="form-group">
@@ -485,10 +510,14 @@
 
             <!-- CARGA CSV MASIVA -->
             <div class="panel">
-                <div class="panel-title">
-                    <span class="panel-title-icon">📤</span>
-                    <span>Carga Masiva (CSV)</span>
+                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="panel-title-icon">📤</span>
+                        <span>Carga Masiva (CSV)</span>
+                    </div>
+                    <span class="step-badge" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-color: rgba(59, 130, 246, 0.3);">Opción B</span>
                 </div>
+                <div class="panel-subtitle">Importe o actualice un listado de productos de forma masiva mediante un archivo CSV.</div>
                 <form id="csv-form" enctype="multipart/form-data">
                     <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:12px;">
                         Sube un archivo CSV con las columnas <code>codigo_barras</code>, <code>nombre</code> y <code>precio</code> (también admite <code>categoria_fse</code> y <code>palabras_clave_ocr</code>).

@@ -235,6 +235,27 @@
             font-size: 1.4rem;
         }
 
+        .step-badge {
+            background: var(--success-glow);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: inline-block;
+        }
+
+        .panel-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-top: -12px;
+            margin-bottom: 8px;
+        }
+
         /* Forms styling */
         .form-group {
             display: flex;
@@ -503,14 +524,31 @@
     <div class="main-layout">
         <!-- SIDEBAR: FORM & PROJECT POOLS -->
         <div style="display: flex; flex-direction: column; gap: 32px;">
+            <!-- PROYECTOS ACTIVOS -->
+            <div class="panel">
+                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
+                    <div class="panel-title-left">
+                        <span class="panel-title-icon">📂</span>
+                        <span>Límites FSE+ por Proyecto</span>
+                    </div>
+                    <span class="step-badge">Paso 1</span>
+                </div>
+                <div class="panel-subtitle">Revise sus límites y códigos de proyectos FSE+ aprobados por Up Spain.</div>
+                <div style="display: flex; flex-direction: column; gap: 12px;" id="projects-list-container">
+                    <div class="empty-state">No hay presupuestos FSE+ vinculados.</div>
+                </div>
+            </div>
+
             <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
             <div class="panel">
-                <div class="panel-title">
+                <div class="panel-title" style="justify-content: space-between; align-items: center; width: 100%;">
                     <div class="panel-title-left">
                         <span class="panel-title-icon" id="form-icon">👤</span>
                         <span id="form-title">Registrar Beneficiario</span>
                     </div>
+                    <span class="step-badge">Paso 2</span>
                 </div>
+                <div class="panel-subtitle">Asigne saldo a un beneficiario vinculándolo a uno de los códigos de proyecto activos.</div>
                 <form id="beneficiary-form">
                     <input type="hidden" id="edit-user-id" value="">
                     <div class="form-group">
@@ -530,19 +568,6 @@
                     <button type="submit" class="btn-submit" id="btn-submit-text">Crear Beneficiario</button>
                     <button type="button" class="btn-cancel" id="btn-cancel-edit">Cancelar Edición</button>
                 </form>
-            </div>
-
-            <!-- PROYECTOS ACTIVOS -->
-            <div class="panel">
-                <div class="panel-title">
-                    <div class="panel-title-left">
-                        <span class="panel-title-icon">📂</span>
-                        <span>Límites FSE+ por Proyecto</span>
-                    </div>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 12px;" id="projects-list-container">
-                    <div class="empty-state">No hay presupuestos FSE+ vinculados.</div>
-                </div>
             </div>
         </div>
 
