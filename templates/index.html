@@ -497,6 +497,20 @@
             </div>
         </div>
 
+        <!-- Custom Manual Code Modal -->
+        <div class="scanner-modal" id="manual-code-modal">
+            <div style="background: white; padding: 24px; border-radius: 16px; width: 90%; max-width: 320px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <div style="font-size: 2rem; margin-bottom: 10px;">📝</div>
+                <h3 style="margin-bottom: 8px; color: var(--text-main);">Código Manual</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">Introduce el código de barras del producto.</p>
+                <input type="text" id="manual-barcode-input" placeholder="Ej: 5449000000996" value="5449000000996" style="width: 100%; padding: 12px; font-size: 1.2rem; text-align: center; border: 2px solid var(--border); border-radius: 8px; margin-bottom: 20px; outline: none; box-sizing: border-box; color: var(--text-main); background: #fff;">
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-secondary" onclick="closeManualCodeModal()" style="flex: 1; border: 1px solid var(--border); color: var(--text-main);">Cancelar</button>
+                    <button class="btn btn-primary" onclick="submitManualCode()" style="flex: 1;">Añadir</button>
+                </div>
+            </div>
+        </div>
+
         <div class="toast" id="toast"></div>
         
         <div style="text-align: center; padding: 15px; font-size: 0.85rem; color: var(--text-muted); opacity: 0.8;">
@@ -845,11 +859,22 @@
                 showToast("⚠️ Por favor, selecciona un supermercado primero.");
                 return;
             }
-            const barcodeInput = prompt(
-                "Introduce el código de barras (Ej:\n5449000000996 = Coca-Cola\n3017620422003 = Nutella\n8000500310427 = Ferrero Rocher):", 
-                "5449000000996"
-            );
-            processBarcode(barcodeInput);
+            document.getElementById('manual-barcode-input').value = "5449000000996";
+            document.getElementById('manual-code-modal').classList.add('show');
+        }
+
+        function closeManualCodeModal() {
+            document.getElementById('manual-code-modal').classList.remove('show');
+        }
+
+        function submitManualCode() {
+            const barcodeVal = document.getElementById('manual-barcode-input').value.trim();
+            if (!barcodeVal) {
+                showToast("⚠️ Por favor, introduce un código de barras válido.");
+                return;
+            }
+            closeManualCodeModal();
+            processBarcode(barcodeVal);
         }
 
         async function processBarcode(barcodeInput) {
@@ -947,6 +972,19 @@
                     method: 'POST',
                     body: formData
                 });
+                
+                if (!response.ok) {
+                    let errMsg = "Error en el servicio de validación";
+                    try {
+                        const errData = await response.json();
+                        if (errData && errData.error) {
+                            errMsg = errData.error;
+                        }
+                    } catch (e) {}
+                    showToast(errMsg);
+                    document.getElementById('btn-pay').classList.remove('active');
+                    return;
+                }
                 
                 const report = await response.json();
                 

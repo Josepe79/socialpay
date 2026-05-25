@@ -263,6 +263,62 @@
             margin-bottom: 8px;
         }
 
+        /* Accordion CSS for collapsible form sections */
+        .accordion-section {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(15, 17, 21, 0.3);
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .accordion-header {
+            padding: 14px 16px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-main);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .accordion-header:hover {
+            background: rgba(227, 82, 5, 0.04);
+            color: var(--primary);
+        }
+
+        .accordion-header.active {
+            border-bottom: 1px solid var(--border);
+            background: rgba(227, 82, 5, 0.05);
+            color: var(--primary);
+        }
+
+        .accordion-arrow {
+            transition: transform 0.3s;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .accordion-header.active .accordion-arrow {
+            transform: rotate(180deg);
+            color: var(--primary);
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, padding 0.3s ease-out, opacity 0.3s ease-out;
+            opacity: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 0 16px;
+        }
+
         /* Forms styling */
         .form-group {
             display: flex;
@@ -491,50 +547,74 @@
             </div>
             <div class="panel-subtitle">Cree la cuenta del gestor en el sistema FSE+ y asigne su primer proyecto y presupuesto de partida.</div>
             <form id="create-gestor-form">
-                <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">1. DATOS INSTITUCIONALES</div>
-                <div class="form-group">
-                    <label for="gestor_nombre">Nombre de la Institución</label>
-                    <input type="text" id="gestor_nombre" placeholder="Ej: Ayuntamiento de Barcelona" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_cif">CIF (Formato Español)</label>
-                    <input type="text" id="gestor_cif" placeholder="Ej: P0801900B" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_direccion">Dirección Física</label>
-                    <input type="text" id="gestor_direccion" placeholder="Ej: Plaza Sant Jaume, 1" required>
-                </div>
-
-                <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-top:16px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">2. VINCULACIÓN DE FONDOS FSE+</div>
-                <div class="form-group">
-                    <label for="gestor_proyecto_fse">Código Proyecto FSE+</label>
-                    <input type="text" id="gestor_proyecto_fse" placeholder="Ej: FSE-CAT-2026" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_presupuesto">Presupuesto Inicial (€)</label>
-                    <input type="number" step="0.01" min="0.01" id="gestor_presupuesto" placeholder="Ej: 25000.00" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_tasa">Tasa de Cofinanciación (0.00 - 1.00)</label>
-                    <input type="number" step="0.01" min="0" max="1" id="gestor_tasa" placeholder="Ej: 0.70" required>
+                <!-- SECCIÓN 1: DATOS INSTITUCIONALES -->
+                <div class="accordion-section">
+                    <div class="accordion-header active" onclick="toggleAccordion(this)">
+                        <span>1. DATOS INSTITUCIONALES</span>
+                        <span class="accordion-arrow">▼</span>
+                    </div>
+                    <div class="accordion-content" style="max-height: 500px; padding: 16px; opacity: 1;">
+                        <div class="form-group">
+                            <label for="gestor_nombre">Nombre de la Institución</label>
+                            <input type="text" id="gestor_nombre" placeholder="Ej: Ayuntamiento de Barcelona" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_cif">CIF (Formato Español)</label>
+                            <input type="text" id="gestor_cif" placeholder="Ej: P0801900B" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_direccion">Dirección Física</label>
+                            <input type="text" id="gestor_direccion" placeholder="Ej: Plaza Sant Jaume, 1" required>
+                        </div>
+                    </div>
                 </div>
 
-                <div style="font-size:0.8rem; font-weight:600; color:var(--primary); margin-top:16px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">3. CREDENCIALES DE ACCESO</div>
-                <div class="form-group">
-                    <label for="gestor_responsable">Responsable de Cuenta</label>
-                    <input type="text" id="gestor_responsable" placeholder="Ej: Ana Gómez López" required>
+                <!-- SECCIÓN 2: VINCULACIÓN DE FONDOS FSE+ -->
+                <div class="accordion-section">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <span>2. VINCULACIÓN DE FONDOS FSE+</span>
+                        <span class="accordion-arrow">▼</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="form-group">
+                            <label for="gestor_proyecto_fse">Código Proyecto FSE+</label>
+                            <input type="text" id="gestor_proyecto_fse" placeholder="Ej: FSE-CAT-2026" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_presupuesto">Presupuesto Inicial</label>
+                            <input type="text" id="gestor_presupuesto" class="money-input" placeholder="Ej: 25.000,00 €" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_tasa">Tasa de Cofinanciación FSE (ej: 0,70 para 70%)</label>
+                            <input type="text" id="gestor_tasa" placeholder="Ej: 0,70" required>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="gestor_email">Email Institucional</label>
-                    <input type="email" id="gestor_email" placeholder="Ej: responsable@ayto.es" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_password">Contraseña Temporal</label>
-                    <input type="password" id="gestor_password" placeholder="Mínimo 8 caracteres" required>
-                </div>
-                <div class="form-group">
-                    <label for="gestor_movil">Teléfono Móvil (MFA)</label>
-                    <input type="text" id="gestor_movil" placeholder="Ej: +34600123456" required>
+
+                <!-- SECCIÓN 3: CREDENCIALES DE ACCESO -->
+                <div class="accordion-section">
+                    <div class="accordion-header" onclick="toggleAccordion(this)">
+                        <span>3. CREDENCIALES DE ACCESO</span>
+                        <span class="accordion-arrow">▼</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="form-group">
+                            <label for="gestor_responsable">Responsable de Cuenta</label>
+                            <input type="text" id="gestor_responsable" placeholder="Ej: Ana Gómez López" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_email">Email Institucional</label>
+                            <input type="email" id="gestor_email" placeholder="Ej: responsable@ayto.es" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_password">Contraseña Temporal</label>
+                            <input type="password" id="gestor_password" placeholder="Mínimo 8 caracteres" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="gestor_movil">Teléfono Móvil (MFA)</label>
+                            <input type="text" id="gestor_movil" placeholder="Ej: +34600123456" required>
+                        </div>
+                    </div>
                 </div>
 
                 <button type="submit" class="btn-submit">Crear Cuenta de Gestor</button>
@@ -563,12 +643,12 @@
                     <input type="text" id="codigo_proyecto_fse" name="codigo_proyecto_fse" placeholder="Ej: FSE-CAT-2026" required>
                 </div>
                 <div class="form-group">
-                    <label for="presupuesto_total">Presupuesto Total (€)</label>
-                    <input type="number" step="0.01" id="presupuesto_total" name="presupuesto_total" placeholder="Ej: 50000.00" required>
+                    <label for="presupuesto_total">Presupuesto Total</label>
+                    <input type="text" id="presupuesto_total" class="money-input" placeholder="Ej: 50.000,00 €" required>
                 </div>
                 <div class="form-group">
-                    <label for="tasa_cofinanciacion">Tasa de Cofinanciación FSE (ej: 0.70 para 70%)</label>
-                    <input type="number" step="0.01" min="0" max="1" id="tasa_cofinanciacion" name="tasa_cofinanciacion" placeholder="Ej: 0.70" required>
+                    <label for="tasa_cofinanciacion">Tasa de Cofinanciación FSE (ej: 0,70 para 70%)</label>
+                    <input type="text" id="tasa_cofinanciacion" name="tasa_cofinanciacion" placeholder="Ej: 0,70" required>
                 </div>
                 <button type="submit" class="btn-submit">Registrar Asignación</button>
             </form>
@@ -637,6 +717,89 @@
 </div>
 
 <script>
+    // Accordion Toggle
+    function toggleAccordion(header) {
+        header.classList.toggle('active');
+        const content = header.nextElementSibling;
+        if (header.classList.contains('active')) {
+            content.style.maxHeight = content.scrollHeight + 'px';
+            content.style.padding = '16px';
+            content.style.opacity = '1';
+        } else {
+            content.style.maxHeight = '0';
+            content.style.padding = '0 16px';
+            content.style.opacity = '0';
+        }
+    }
+
+    // Format money value to Spanish standard (thousands dot, decimal comma, € suffix)
+    function formatSpanishCurrencyInput(val) {
+        let cleaned = val.replace(/[^\d.,]/g, '');
+        if (!cleaned) return '';
+        
+        let parts;
+        if (cleaned.indexOf(',') !== -1) {
+            let noDots = cleaned.replace(/\./g, '');
+            parts = noDots.split(',');
+        } else {
+            let lastDotIdx = cleaned.lastIndexOf('.');
+            if (lastDotIdx !== -1 && cleaned.length - lastDotIdx <= 3) {
+                parts = [cleaned.substring(0, lastDotIdx).replace(/\./g, ''), cleaned.substring(lastDotIdx + 1)];
+            } else {
+                parts = [cleaned.replace(/\./g, ''), ''];
+            }
+        }
+        
+        let integerPart = parts[0] || '0';
+        let decimalPart = parts[1] || '00';
+        if (decimalPart.length === 1) decimalPart += '0';
+        if (decimalPart.length > 2) decimalPart = decimalPart.substring(0, 2);
+        
+        let num = parseFloat(integerPart + '.' + decimalPart);
+        if (isNaN(num)) return '';
+        
+        return new Intl.NumberFormat('es-ES', { 
+            minimumFractionDigits: 2, 
+            maximumFractionDigits: 2 
+        }).format(num) + ' €';
+    }
+
+    // Parse formatted Spanish string to a simple string standard (e.g. 50000,00) for focus mode
+    function parseSpanishCurrencyInput(val) {
+        let cleaned = val.replace(/[^\d.,]/g, '');
+        if (cleaned.indexOf(',') !== -1) {
+            let noDots = cleaned.replace(/\./g, '');
+            return noDots;
+        } else {
+            let lastDotIdx = cleaned.lastIndexOf('.');
+            if (lastDotIdx !== -1 && cleaned.length - lastDotIdx <= 3) {
+                let integerPart = cleaned.substring(0, lastDotIdx).replace(/\./g, '');
+                let decimalPart = cleaned.substring(lastDotIdx + 1);
+                return integerPart + ',' + decimalPart;
+            } else {
+                return cleaned.replace(/\./g, '');
+            }
+        }
+    }
+
+    // Parse Spanish float format to standard float
+    function parseSpanishFloatJS(val) {
+        if (typeof val === 'number') return val;
+        if (!val) return NaN;
+        let cleaned = val.trim().replace(/€/g, '').replace(/\s/g, '');
+        if (cleaned.includes(',')) {
+            cleaned = cleaned.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+            let lastDotIdx = cleaned.lastIndexOf('.');
+            if (lastDotIdx !== -1 && cleaned.length - lastDotIdx <= 3) {
+                cleaned = cleaned.replace(/\./g, '.');
+            } else {
+                cleaned = cleaned.replace(/\./g, '');
+            }
+        }
+        return parseFloat(cleaned);
+    }
+
     // format euro currency
     function formatEuro(val) {
         return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(val);
@@ -756,11 +919,24 @@
     // Submit assignment
     document.getElementById('assign-funds-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        const budgetVal = parseSpanishFloatJS(document.getElementById('presupuesto_total').value);
+        if (isNaN(budgetVal) || budgetVal <= 0) {
+            showToast('El presupuesto total debe ser un número positivo.', 'error');
+            return;
+        }
+
+        const tasaVal = parseSpanishFloatJS(document.getElementById('tasa_cofinanciacion').value);
+        if (isNaN(tasaVal) || tasaVal < 0 || tasaVal > 1) {
+            showToast('La tasa de cofinanciación debe estar entre 0.00 y 1.00.', 'error');
+            return;
+        }
+
         const payload = {
             gestor_id: document.getElementById('gestor_id').value,
             codigo_proyecto_fse: document.getElementById('codigo_proyecto_fse').value,
-            presupuesto_total: parseFloat(document.getElementById('presupuesto_total').value),
-            tasa_cofinanciacion: parseFloat(document.getElementById('tasa_cofinanciacion').value)
+            presupuesto_total: budgetVal,
+            tasa_cofinanciacion: tasaVal
         };
 
         try {
@@ -773,6 +949,7 @@
             if (res.status === 200 || res.status === 201) {
                 showToast(`Asignación para ${payload.codigo_proyecto_fse} registrada con éxito.`, 'success');
                 document.getElementById('assign-funds-form').reset();
+                document.querySelectorAll('#assign-funds-form .money-input').forEach(input => input.value = '');
                 loadDashboardData();
             } else {
                 showToast(data.error || 'Error al guardar asignación.', 'error');
@@ -801,13 +978,13 @@
             return;
         }
 
-        const budget = parseFloat(document.getElementById('gestor_presupuesto').value);
+        const budget = parseSpanishFloatJS(document.getElementById('gestor_presupuesto').value);
         if (isNaN(budget) || budget <= 0) {
             showToast('El presupuesto inicial debe ser un número positivo.', 'error');
             return;
         }
 
-        const tasa = parseFloat(document.getElementById('gestor_tasa').value);
+        const tasa = parseSpanishFloatJS(document.getElementById('gestor_tasa').value);
         if (isNaN(tasa) || tasa < 0 || tasa > 1) {
             showToast('La tasa de cofinanciación debe estar entre 0.00 y 1.00.', 'error');
             return;
@@ -836,6 +1013,24 @@
             if (res.status === 200 || res.status === 201) {
                 showToast(`Gestor ${payload.email} creado con éxito y fondos vinculados.`, 'success');
                 document.getElementById('create-gestor-form').reset();
+                document.querySelectorAll('#create-gestor-form .money-input').forEach(input => input.value = '');
+                
+                // Collapse non-first sections and expand the first one
+                document.querySelectorAll('#create-gestor-form .accordion-header').forEach((h, idx) => {
+                    const content = h.nextElementSibling;
+                    if (idx === 0) {
+                        h.classList.add('active');
+                        content.style.maxHeight = '500px';
+                        content.style.padding = '16px';
+                        content.style.opacity = '1';
+                    } else {
+                        h.classList.remove('active');
+                        content.style.maxHeight = '0';
+                        content.style.padding = '0 16px';
+                        content.style.opacity = '0';
+                    }
+                });
+
                 loadDashboardData();
             } else {
                 showToast(data.error || 'Error al crear gestor.', 'error');
@@ -844,6 +1039,29 @@
             console.error(err);
             showToast('Error de red al crear gestor.', 'error');
         }
+    });
+
+    // Setup money-input event listeners on load
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.money-input').forEach(input => {
+            if (input.value) {
+                input.value = formatSpanishCurrencyInput(input.value);
+            }
+            
+            input.addEventListener('focus', (e) => {
+                const val = e.target.value;
+                if (val) {
+                    e.target.value = parseSpanishCurrencyInput(val);
+                }
+            });
+            
+            input.addEventListener('blur', (e) => {
+                const val = e.target.value;
+                if (val) {
+                    e.target.value = formatSpanishCurrencyInput(val);
+                }
+            });
+        });
     });
 
     // Initial load

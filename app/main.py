@@ -34,7 +34,18 @@ from sqlalchemy.orm import Session
 from app.database import get_db, engine
 from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel, AsignacionFondosGestor as AFGModel
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
+
+def parse_spanish_float(val) -> float:
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        cleaned = val.strip().replace("€", "").replace(" ", "")
+        if "," in cleaned:
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        return float(cleaned)
+    return float(val)
+
 
 import hashlib
 import secrets
@@ -1278,16 +1289,16 @@ class SystemUserUpdateSchema(BaseModel):
 class AsignarFondosSchema(BaseModel):
     gestor_id: str
     codigo_proyecto_fse: str
-    presupuesto_total: float
-    tasa_cofinanciacion: float
+    presupuesto_total: Union[float, str]
+    tasa_cofinanciacion: Union[float, str]
 
 class GestorCreateSchema(BaseModel):
     nombre_institucion: str
     cif: str
     direccion: str
     codigo_proyecto_fse: str
-    presupuesto_inicial: float
-    tasa_cofinanciacion: float
+    presupuesto_inicial: Union[float, str]
+    tasa_cofinanciacion: Union[float, str]
     responsable: str
     email: str
     password: str
@@ -1817,6 +1828,18 @@ async def asignar_fondos(
     if not gestor:
         return JSONResponse(status_code=400, content={"error": "El gestor especificado no existe o no tiene el rol de gestor."})
         
+    try:
+        presupuesto_total_val = parse_spanish_float(item.presupuesto_total)
+        tasa_val = parse_spanish_float(item.tasa_cofinanciacion)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "El presupuesto y la tasa de cofinanciación deben ser números válidos."})
+        
+    if presupuesto_total_val <= 0:
+        return JSONResponse(status_code=400, content={"error": "El presupuesto total debe ser un número positivo."})
+        
+    if not (0 <= tasa_val <= 1):
+        return JSONResponse(status_code=400, content={"error": "La tasa de cofinanciación debe estar entre 0.00 y 1.00 (ej: 0.70 para el 70%)."})
+
     existing = db.query(AFGModel).filter(
         AFGModel.gestor_id == gestor_uuid,
         AFGModel.codigo_proyecto_fse == item.codigo_proyecto_fse
@@ -1824,8 +1847,8 @@ async def asignar_fondos(
     
     from decimal import Decimal
     if existing:
-        existing.presupuesto_total = Decimal(str(item.presupuesto_total))
-        existing.tasa_cofinanciacion = Decimal(str(item.tasa_cofinanciacion))
+        existing.presupuesto_total = Decimal(str(presupuesto_total_val))
+        existing.tasa_cofinanciacion = Decimal(str(tasa_val))
         db.commit()
         db.refresh(existing)
         return {
@@ -1843,8 +1866,8 @@ async def asignar_fondos(
         new_alloc = AFGModel(
             gestor_id=gestor_uuid,
             codigo_proyecto_fse=item.codigo_proyecto_fse,
-            presupuesto_total=Decimal(str(item.presupuesto_total)),
-            tasa_cofinanciacion=Decimal(str(item.tasa_cofinanciacion)),
+            presupuesto_total=Decimal(str(presupuesto_total_val)),
+            tasa_cofinanciacion=Decimal(str(tasa_val)),
             presupuesto_consumido=Decimal("0.00")
         )
         db.add(new_alloc)
@@ -1891,8 +1914,11 @@ async def crear_gestor(
     cif_val = re.sub(r'[\s\-]', '', item.cif).upper()
     direccion_val = item.direccion.strip()
     codigo_proyecto_val = item.codigo_proyecto_fse.strip()
-    presupuesto_val = item.presupuesto_inicial
-    tasa_val = item.tasa_cofinanciacion
+    try:
+        presupuesto_val = parse_spanish_float(item.presupuesto_inicial)
+        tasa_val = parse_spanish_float(item.tasa_cofinanciacion)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "El presupuesto inicial y la tasa de cofinanciación deben ser números válidos."})
     responsable_val = item.responsable.strip()
     email_val = item.email.strip().lower()
     password_val = item.password.strip()
