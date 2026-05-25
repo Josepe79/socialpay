@@ -2018,6 +2018,87 @@ async def crear_gestor(
         }
     }
 
+@app.post(
+    "/api/supermercado/cargar-semilla",
+    summary="Cargar Catálogo Semilla para el Supermercado",
+    description="Inicializa el catálogo del supermercado con una selección de productos semilla y precios realistas predefinidos.",
+    tags=["[SUPERMERCADO] Catálogos"],
+    responses={
+        200: {"description": "Catálogo semilla cargado con éxito."},
+        403: {"description": "Acceso denegado. Rol incorrecto o sesión inválida."}
+    }
+)
+async def cargar_catalogo_semilla(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    user = await get_current_supermercado(request, db)
+    if not user:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+        
+    supermarket_id = user.email.split('@')[0]
+    
+    # Precios por defecto realistas por categoría
+    category_prices = {
+        "dairy": 1.25,
+        "beverages": 1.75,
+        "alcoholic-beverages": 2.10,
+        "oils": 4.95,
+        "condiments": 0.85,
+        "sweeteners": 1.20,
+        "grains": 1.40,
+        "pasta": 1.10,
+        "bread": 1.25,
+        "cereals": 2.30,
+        "bakery": 1.80,
+        "snack": 1.50,
+        "chocolate": 2.45,
+        "cocoa": 2.75,
+        "coffee": 2.85,
+        "tea": 1.35,
+        "sauce": 1.15,
+        "fish": 2.25,
+        "meat": 3.45,
+        "eggs": 2.50,
+        "frozen": 2.95,
+        "hygiene": 2.20,
+        "baby": 6.80,
+        "cleaning": 3.50
+    }
+    
+    imported_count = 0
+    
+    for barcode, name, category in SEED_CATALOG:
+        # Check if already exists for this supermarket
+        existing = db.query(PSModel).filter(
+            PSModel.supermercado_id == supermarket_id,
+            PSModel.codigo_barras == barcode
+        ).first()
+        
+        if not existing:
+            # Generate OCR keywords
+            words = [w.upper() for w in name.split() if len(w) > 2 and w.lower() not in ["con", "para", "del", "una", "los", "las", "pack"]]
+            price = category_prices.get(category, 1.50)
+            
+            new_prod = PSModel(
+                supermercado_id=supermarket_id,
+                codigo_barras=barcode,
+                nombre=name,
+                precio=price,
+                categoria_fse=category,
+                palabras_clave_ocr=words
+            )
+            db.add(new_prod)
+            imported_count += 1
+            
+    if imported_count > 0:
+        db.commit()
+        
+    return {
+        "status": "success",
+        "message": f"Se han importado {imported_count} productos semilla al catálogo de {supermarket_id}."
+    }
+
 @app.get(
     "/api/supermercado/dashboard-data",
     summary="Obtener Datos de Facturación de Supermercado",

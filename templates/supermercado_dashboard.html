@@ -540,8 +540,12 @@
                         <div style="font-size:0.75rem; margin-top:4px;" id="file-name">Ningún archivo seleccionado</div>
                     </div>
                 </div>
-                <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">Subir Lote CSV</button>
+                <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2); margin-bottom: 16px;">Subir Lote CSV</button>
             </form>
+            <div style="border-top: 1px dashed var(--border); padding-top: 16px; margin-top: 8px; text-align: center;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 8px;">¿Quieres inicializar el catálogo rápidamente?</span>
+                <button type="button" onclick="cargarCatalogoSemilla()" class="btn-submit" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2); width: auto; display: inline-block; padding: 10px 20px;">🌱 Cargar Catálogo Semilla</button>
+            </div>
         </div>
     </div>
 
@@ -780,6 +784,28 @@
             showToast('Error de red al procesar CSV.', 'error');
         }
     });
+
+    async function cargarCatalogoSemilla() {
+        if (!confirm("¿Deseas inicializar el catálogo con todos los productos semilla del sistema? Se asignarán precios y categorías realistas por defecto.")) {
+            return;
+        }
+        
+        try {
+            const res = await fetch('/api/supermercado/cargar-semilla', {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.status === 200) {
+                showToast(data.message || 'Catálogo semilla cargado correctamente.');
+                loadDashboard();
+            } else {
+                showToast(data.error || 'Error al cargar catálogo semilla.', 'error');
+            }
+        } catch (err) {
+            console.error(err);
+            showToast('Error de red al inicializar catálogo.', 'error');
+        }
+    }
 
     // Initial load
     loadDashboard();
