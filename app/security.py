@@ -3,8 +3,18 @@ import secrets
 from itsdangerous import URLSafeTimedSerializer
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from fastapi import Request
 
-limiter = Limiter(key_func=get_remote_address)
+
+def get_client_ip(request: Request) -> str:
+    """Lee la IP real del cliente respetando X-Forwarded-For de Railway/proxies."""
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_client_ip)
 
 _SECRET = os.environ.get("SESSION_SECRET_KEY", "dev-secret-change-in-production")
 _serializer = URLSafeTimedSerializer(_SECRET)
