@@ -1,26 +1,93 @@
 import requests
-import re
+
+# Mapeo de etiquetas OFF a categorías FSE+ internas
+_OFF_CATEGORY_MAP = {
+    # Lácteos
+    'en:dairy-products': 'dairy', 'en:milks': 'dairy', 'en:cheeses': 'dairy',
+    'en:yogurts': 'dairy', 'en:butters': 'dairy', 'en:creams': 'dairy',
+    # Bebidas no alcohólicas
+    'en:beverages': 'beverages', 'en:waters': 'beverages',
+    'en:fruit-juices': 'beverages', 'en:sodas': 'beverages',
+    'en:soft-drinks': 'beverages',
+    # Bebidas alcohólicas (bloqueadas)
+    'en:alcoholic-beverages': 'alcoholic-beverages', 'en:beers': 'alcoholic-beverages',
+    'en:wines': 'alcoholic-beverages', 'en:spirits': 'alcoholic-beverages',
+    'en:ciders': 'alcoholic-beverages',
+    # Carne y embutidos
+    'en:meats': 'meat', 'en:poultry': 'meat', 'en:hams': 'meat',
+    'en:sausages': 'meat', 'en:deli-meats': 'meat',
+    # Pescado
+    'en:fish-and-seafood': 'fish', 'en:canned-fish': 'fish',
+    'en:tunas': 'fish', 'en:salmons': 'fish',
+    # Huevos
+    'en:eggs': 'eggs',
+    # Congelados
+    'en:frozen-foods': 'frozen', 'en:ice-creams': 'frozen', 'en:pizzas': 'frozen',
+    # Snacks y galletas
+    'en:snacks': 'snack', 'en:chips-and-crisps': 'snack',
+    'en:biscuits-and-cakes': 'snack', 'en:crackers': 'snack',
+    # Chocolate y cacao
+    'en:chocolates': 'chocolate', 'en:chocolate-candies': 'chocolate',
+    'en:cocoa-and-its-products': 'cocoa',
+    # Café e infusiones
+    'en:coffees': 'coffee', 'en:teas': 'tea', 'en:infusions': 'tea',
+    # Cereales y pasta
+    'en:cereals-and-their-products': 'cereals', 'en:breakfast-cereals': 'cereals',
+    'en:pasta': 'pasta', 'en:rice': 'grains', 'en:flours': 'bread',
+    # Pan y bollería
+    'en:breads': 'bakery', 'en:pastries': 'bakery', 'en:cakes': 'bakery',
+    # Aceites y condimentos
+    'en:plant-based-oils': 'oils', 'en:olive-oils': 'oils',
+    'en:vinegars': 'condiments', 'en:salts': 'condiments',
+    # Salsas y conservas
+    'en:sauces': 'sauce', 'en:ketchup': 'sauce',
+    'en:mayonnaises': 'sauce', 'en:tomato-sauces': 'sauce',
+    # Azúcares
+    'en:sweeteners': 'sweeteners', 'en:sugars': 'sweeteners',
+    # Higiene
+    'en:hygiene-products': 'hygiene', 'en:shampoos': 'hygiene',
+    'en:soaps': 'hygiene', 'en:toothpastes': 'hygiene',
+    'en:deodorants': 'hygiene', 'en:toilet-papers': 'hygiene',
+    # Bebé
+    'en:baby-foods': 'baby', 'en:diapers': 'baby', 'en:infant-formulas': 'baby',
+    # Limpieza
+    'en:cleaning-products': 'cleaning', 'en:detergents': 'cleaning',
+    'en:bleaches': 'cleaning', 'en:fabric-softeners': 'cleaning',
+}
+
+# Etiquetas OFF que implican producto no permitido en FSE+
+_BLOCKED_OFF_TAGS = {
+    'en:alcoholic-beverages', 'en:beers', 'en:wines', 'en:spirits',
+    'en:ciders', 'en:tobacco', 'en:tobaccos', 'en:cigarettes',
+}
+
 
 class ProductMatcher:
     def __init__(self):
-        # URL base de la API de Open Food Facts
         self.off_url = "https://world.openfoodfacts.org/api/v0/product/"
-        # Caché en memoria para no repetir llamadas a OFF (evita 429)
         self._cache = {}
 
-    def get_product_info(self, barcode):
-        """Consulta Open Food Facts para identificar el producto."""
-        # Devolvemos desde caché si ya lo consultamos antes
+    def _map_category(self, categories_tags: list) -> str:
+        for tag in categories_tags:
+            cat = _OFF_CATEGORY_MAP.get(tag)
+            if cat:
+                return cat
+        return 'unknown'
+
+    def get_product_info(self, barcode: str) -> dict:
+        """Consulta Open Food Facts. Devuelve {name, allowed, category}."""
         if barcode in self._cache:
             return self._cache[barcode]
 
         try:
             headers = {"User-Agent": "SocialPayMVP - Android - Version 1.0 - www.jepco.es"}
-            response = requests.get(f"{self.off_url}{barcode}.json", headers=headers, timeout=5)
+            response = requests.get(
+                f"{self.off_url}{barcode}.json", headers=headers, timeout=5
+            )
 
             if response.status_code == 429:
-                result = {"name": "Límite de consultas alcanzado. Espera unos segundos.", "allowed": True}
-                return result  # No guardamos en caché para poder reintentar
+                return {"name": "Límite de consultas alcanzado. Espera unos segundos.",
+                        "allowed": True, "category": "unknown"}
 
             if response.status_code == 200:
                 data = response.json()
@@ -28,36 +95,18 @@ class ProductMatcher:
                     product = data['product']
                     name = product.get('product_name', 'Producto desconocido')
                     categories = product.get('categories_tags', [])
-
-                    # Lógica de bloqueo: No permitimos alcohol ni tabaco
-                    is_allowed = not any(tag in categories for tag in ['en:alcoholic-beverages', 'en:tobacco'])
-
-                    result = {"name": name, "allowed": is_allowed}
+                    is_allowed = not any(tag in _BLOCKED_OFF_TAGS for tag in categories)
+                    category = self._map_category(categories)
+                    result = {"name": name, "allowed": is_allowed, "category": category}
                 else:
-                    result = {"name": f"Producto no en base de datos (Status: {data.get('status')})", "allowed": True}
+                    result = {"name": f"Producto no encontrado en base de datos.",
+                              "allowed": True, "category": "unknown"}
             else:
-                result = {"name": f"Error HTTP {response.status_code} desde OFF", "allowed": True}
+                result = {"name": f"Error HTTP {response.status_code} desde OFF",
+                          "allowed": True, "category": "unknown"}
 
-            # Guardamos en caché el resultado
             self._cache[barcode] = result
             return result
 
         except Exception as e:
-            return {"name": f"Error interno: {str(e)}", "allowed": True}
-
-    def match_ticket_vs_cart(self, cart_total, ocr_text):
-        """
-        Compara el total del carrito escaneado con el texto del ticket.
-        Busca el patrón de moneda (ej: 42.50) en el texto del OCR.
-        """
-        # Buscamos números que parezcan importes (ej: 42,50 o 42.50)
-        amounts = re.findall(r'\d+[.,]\d{2}', ocr_text)
-        
-        # Limpiamos los puntos y comas para comparar decimales
-        clean_amounts = [float(a.replace(',', '.')) for a in amounts]
-        
-        # Si el total del carrito está entre los números del ticket, ¡HAY MATCH!
-        if cart_total in clean_amounts:
-            return True
-            
-        return False
+            return {"name": f"Error interno: {str(e)}", "allowed": True, "category": "unknown"}

@@ -1,3 +1,4 @@
+import difflib
 import json
 import shutil
 import uuid
@@ -25,7 +26,9 @@ from app.db_helpers import (
     db_upsert_product,
 )
 from app.models import AuditoriaTransaccion as ATModel
+from app.models import Producto
 from app.models import ProductoSupermercado as PSModel
+from app.models import ProductoSupermercadoGlobal as PSGModel
 from app.models import Usuario as UserModel
 from app.security import generate_csrf_token, limiter, validate_csrf_token
 
@@ -113,10 +116,34 @@ async def beneficiary_logout():
     return response
 
 
+def _resolve_price(db: Session, barcode: str, supermarket: str) -> float | None:
+    """Busca el precio de un producto para un supermercado concreto."""
+    if not supermarket:
+        return None
+    sm_prod = db.query(PSModel).filter(
+        PSModel.supermercado_id == supermarket,
+        PSModel.codigo_barras == barcode,
+    ).first()
+    if sm_prod:
+        return float(sm_prod.precio)
+    global_prod = db.query(PSGModel).filter(
+        PSGModel.supermarket == supermarket,
+        PSGModel.barcode == barcode,
+    ).first()
+    if global_prod and global_prod.price_ref:
+        return float(global_prod.price_ref)
+    return None
+
+
 @router.post("/scan-product",
              summary="Escaneo de Código de Barras",
              tags=["[BENEFICIARIO] Aplicación Móvil"])
-async def scan_product(request: Request, barcode: str = Form(...), db: Session = Depends(get_db)):
+async def scan_product(
+    request: Request,
+    barcode: str = Form(...),
+    supermarket: str = Form(default=None),
+    db: Session = Depends(get_db),
+):
     beneficiary_token = request.cookies.get("beneficiary_token")
     if not beneficiary_token:
         return JSONResponse(status_code=403, content={"error": "Acceso denegado. Beneficiario no autenticado."})
@@ -124,22 +151,52 @@ async def scan_product(request: Request, barcode: str = Form(...), db: Session =
     if not user:
         return JSONResponse(status_code=403, content={"error": "Acceso denegado. Token inválido."})
 
+    # 1. Buscar en BD
     product = db_get_by_barcode(db, barcode)
     if product:
-        return {"name": product["name"], "allowed": product["allowed"]}
+        price = _resolve_price(db, barcode, supermarket)
+        return {"name": product["name"], "allowed": product["allowed"],
+                "category": product.get("category", "unknown"), "price": price}
 
+    # 2. Consultar Open Food Facts
     info = matcher.get_product_info(barcode)
-    if "Error" not in info.get("name", "Error") and "desconocido" not in info.get("name", ""):
+    is_valid_product = (
+        "Error" not in info.get("name", "Error")
+        and "desconocido" not in info.get("name", "")
+        and "no encontrado" not in info.get("name", "")
+    )
+    if is_valid_product:
         db_upsert_product(db, barcode=barcode, name=info["name"],
-                          category="unknown", allowed=info["allowed"], source="off")
-    return info
+                          category=info.get("category", "unknown"),
+                          allowed=info["allowed"], source="off")
+
+    price = _resolve_price(db, barcode, supermarket) if is_valid_product else None
+    return {**info, "price": price}
 
 
 @router.post("/scan/manual",
              summary="Adición Manual al Carrito",
              tags=["[BENEFICIARIO] Aplicación Móvil"])
-async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
-    return {"status": "success", "name": product_name, "price": price}
+async def scan_manual(
+    product_name: str = Form(...),
+    price: float = Form(...),
+    db: Session = Depends(get_db),
+):
+    # Comprobar si el nombre coincide con algún producto explícitamente bloqueado
+    blocked = db.query(Producto).filter(Producto.allowed == False).all()
+    name_lower = product_name.lower()
+    for p in blocked:
+        ratio = difflib.SequenceMatcher(None, name_lower, p.name.lower()).ratio()
+        if ratio >= 0.65:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"'{product_name}' no está permitido en el programa FSE+."},
+            )
+
+    # Comprobar si existe en el catálogo permitido
+    results = db_search(db, product_name)
+    verified = len(results) > 0
+    return {"status": "success", "name": product_name, "price": price, "verified": verified}
 
 
 @router.get("/api/search",
