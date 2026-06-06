@@ -18,8 +18,6 @@ import uuid
 import json
 import unicodedata
 import requests
-import psycopg2
-import psycopg2.extras
 import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
@@ -31,7 +29,16 @@ from logic.validator import TicketValidator
 
 from sqlalchemy.orm import Session
 from app.database import get_db, engine
-from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel, AsignacionFondosGestor as AFGModel
+from app.models import (
+    Base,
+    ProductoSupermercado as PSModel,
+    Usuario as UserModel,
+    AuditoriaTransaccion as ATModel,
+    AsignacionFondosGestor as AFGModel,
+    Producto,
+    ProductoSupermercadoGlobal as PSGModel,
+    MapeoTicketProducto,
+)
 from app.sessions import create_session as db_create_session, get_session as db_get_session, mark_mfa_verified, delete_session as db_delete_session
 from app.security import limiter, generate_csrf_token, validate_csrf_token
 from slowapi.errors import RateLimitExceeded
@@ -135,17 +142,6 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 matcher = ProductMatcher()
-
-# ── PostgreSQL ─────────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-
-def get_conn():
-    """Devuelve una conexión psycopg2 nueva."""
-    url = DATABASE_URL
-    # Railway usa postgres://, psycopg2 necesita postgresql://
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(url)
 
 def normalize(s: str) -> str:
     return unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode()
@@ -336,242 +332,163 @@ def init_db():
     except Exception as e:
         print(f"[DB] Error al sembrar usuarios semilla: {e}")
 
-    if not DATABASE_URL:
-        print("[DB] DATABASE_URL no configurado — usando solo catálogo en memoria para productos")
-        return
-        
+    # Carga semilla de productos si la tabla está vacía
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-
-        # Tabla de productos globales
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                barcode     TEXT PRIMARY KEY,
-                name        TEXT NOT NULL,
-                category    TEXT,
-                allowed     BOOLEAN DEFAULT TRUE,
-                source      TEXT DEFAULT 'manual',
-                created_at  TIMESTAMP DEFAULT NOW()
-            )
-        """)
-
-        # Tabla de disponibilidad por supermercado
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS supermarket_products (
-                id              SERIAL PRIMARY KEY,
-                supermarket     TEXT NOT NULL,
-                barcode         TEXT NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
-                price_ref       REAL,
-                available       BOOLEAN DEFAULT TRUE,
-                UNIQUE(supermarket, barcode)
-            )
-        """)
-
-        # Tabla de mapeos de aprendizaje activo
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ticket_product_mappings (
-                id              SERIAL PRIMARY KEY,
-                supermarket     TEXT NOT NULL,
-                raw_ticket_name TEXT NOT NULL,
-                barcode         TEXT NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
-                created_at      TIMESTAMP DEFAULT NOW(),
-                UNIQUE(supermarket, raw_ticket_name)
-            )
-        """)
-
-
-        # Carga semilla solo si la tabla está vacía
-        cur.execute("SELECT COUNT(*) FROM products")
-        count = cur.fetchone()[0]
+        from app.database import SessionLocal as _SL
+        _db = _SL()
+        count = _db.query(Producto).count()
         if count == 0:
             print(f"[DB] Cargando {len(SEED_CATALOG)} productos semilla...")
-            psycopg2.extras.execute_values(
-                cur,
-                "INSERT INTO products (barcode, name, category, source) VALUES %s ON CONFLICT DO NOTHING",
-                [(b, n, c, "local") for b, n, c in SEED_CATALOG]
-            )
+            _db.bulk_save_objects([
+                Producto(barcode=b, name=n, category=c, source="local")
+                for b, n, c in SEED_CATALOG
+            ])
+            _db.commit()
             print("[DB] Catálogo semilla cargado.")
         else:
             print(f"[DB] BBDD ya tiene {count} productos.")
-
-        conn.commit()
-        cur.close()
-        conn.close()
+        _db.close()
     except Exception as e:
-        print(f"[DB] Error inicializando BBDD: {e}")
+        print(f"[DB] Error cargando catálogo semilla: {e}")
 
 # Arrancar init al levantar la app
 @app.on_event("startup")
 def on_startup():
     init_db()
 
-# ── Helpers DB ─────────────────────────────────────────────────────────────────
-def db_search(q: str, supermarket: str = None) -> list:
-    """Busca productos en PostgreSQL. Filtra por supermercado si se indica."""
-    if not DATABASE_URL:
-        return []
+# ── Helpers DB (SQLAlchemy) ────────────────────────────────────────────────────
+
+def db_search(db: Session, q: str, supermarket: str = None) -> list:
+    """Busca productos en la BD. Filtra por supermercado si se indica."""
+    nq = f"%{q}%"
     try:
-        conn = get_conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         if supermarket:
-            cur.execute("""
-                SELECT p.barcode, p.name, p.category, p.allowed, sp.price_ref
-                FROM products p
-                JOIN supermarket_products sp ON p.barcode = sp.barcode
-                WHERE sp.supermarket = %s
-                  AND p.allowed = TRUE
-                  AND unaccent(lower(p.name)) ILIKE unaccent(lower(%s))
-                ORDER BY p.name
-                LIMIT 12
-            """, (supermarket, f"%{q}%"))
+            rows = (
+                db.query(Producto, PSGModel.price_ref)
+                .join(PSGModel, Producto.barcode == PSGModel.barcode)
+                .filter(
+                    PSGModel.supermarket == supermarket,
+                    Producto.allowed == True,
+                    Producto.name.ilike(nq),
+                )
+                .order_by(Producto.name)
+                .limit(12)
+                .all()
+            )
+            return [
+                {"barcode": p.barcode, "name": p.name, "category": p.category,
+                 "allowed": p.allowed, "price_ref": float(pr) if pr else None}
+                for p, pr in rows
+            ]
         else:
-            cur.execute("""
-                SELECT barcode, name, category, allowed, NULL as price_ref
-                FROM products
-                WHERE allowed = TRUE
-                  AND lower(name) ILIKE lower(%s)
-                ORDER BY name
-                LIMIT 12
-            """, (f"%{q}%",))
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return [dict(r) for r in rows]
+            rows = (
+                db.query(Producto)
+                .filter(Producto.allowed == True, Producto.name.ilike(nq))
+                .order_by(Producto.name)
+                .limit(12)
+                .all()
+            )
+            return [
+                {"barcode": p.barcode, "name": p.name, "category": p.category,
+                 "allowed": p.allowed, "price_ref": None}
+                for p in rows
+            ]
     except Exception as e:
         print(f"[DB] Search error: {e}")
         return []
 
-def db_get_by_barcode(barcode: str) -> dict | None:
-    """Busca un producto por código de barras en DB."""
-    if not DATABASE_URL:
-        return None
+def db_get_by_barcode(db: Session, barcode: str) -> dict | None:
+    """Busca un producto por código de barras en BD."""
     try:
-        conn = get_conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT * FROM products WHERE barcode = %s", (barcode,))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return dict(row) if row else None
+        p = db.query(Producto).filter(Producto.barcode == barcode).first()
+        if not p:
+            return None
+        return {"barcode": p.barcode, "name": p.name, "category": p.category,
+                "allowed": p.allowed, "source": p.source}
     except Exception as e:
         print(f"[DB] Barcode lookup error: {e}")
         return None
 
-def db_upsert_product(barcode: str, name: str, category: str, allowed: bool, source: str = "off"):
-    """Guarda o actualiza un producto en DB (aprende de cada escaneo)."""
-    if not DATABASE_URL:
-        return
+def db_upsert_product(db: Session, barcode: str, name: str, category: str, allowed: bool, source: str = "off"):
+    """Guarda o actualiza un producto en BD (aprende de cada escaneo)."""
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO products (barcode, name, category, allowed, source)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (barcode) DO UPDATE
-              SET name = EXCLUDED.name,
-                  category = EXCLUDED.category,
-                  allowed = EXCLUDED.allowed
-        """, (barcode, name, category, allowed, source))
-        conn.commit()
-        cur.close()
-        conn.close()
+        existing = db.query(Producto).filter(Producto.barcode == barcode).first()
+        if existing:
+            existing.name = name
+            existing.category = category
+            existing.allowed = allowed
+        else:
+            db.add(Producto(barcode=barcode, name=name, category=category, allowed=allowed, source=source))
+        db.commit()
     except Exception as e:
+        db.rollback()
         print(f"[DB] Upsert error: {e}")
 
-def db_all_products(supermarket: str = None) -> list:
+def db_all_products(db: Session, supermarket: str = None) -> list:
     """Lista todos los productos (con filtro opcional por supermercado)."""
-    if not DATABASE_URL:
-        return []
     try:
-        conn = get_conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         if supermarket:
-            cur.execute("""
-                SELECT p.barcode, p.name, p.category, p.allowed, p.source,
-                       sp.price_ref, sp.available
-                FROM products p
-                LEFT JOIN supermarket_products sp
-                       ON p.barcode = sp.barcode AND sp.supermarket = %s
-                ORDER BY p.category, p.name
-            """, (supermarket,))
+            rows = (
+                db.query(Producto, PSGModel.price_ref, PSGModel.available)
+                .outerjoin(
+                    PSGModel,
+                    (Producto.barcode == PSGModel.barcode) & (PSGModel.supermarket == supermarket),
+                )
+                .order_by(Producto.category, Producto.name)
+                .all()
+            )
+            return [
+                {"barcode": p.barcode, "name": p.name, "category": p.category,
+                 "allowed": p.allowed, "source": p.source,
+                 "price_ref": float(pr) if pr else None, "available": av}
+                for p, pr, av in rows
+            ]
         else:
-            cur.execute("""
-                SELECT barcode, name, category, allowed, source,
-                       NULL as price_ref, NULL as available
-                FROM products ORDER BY category, name
-            """)
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return [dict(r) for r in rows]
+            rows = db.query(Producto).order_by(Producto.category, Producto.name).all()
+            return [
+                {"barcode": p.barcode, "name": p.name, "category": p.category,
+                 "allowed": p.allowed, "source": p.source, "price_ref": None, "available": None}
+                for p in rows
+            ]
     except Exception as e:
         print(f"[DB] List error: {e}")
         return []
 
-def db_get_barcode_by_mapping(supermarket: str, raw_ticket_name: str) -> str | None:
-    """Busca si un nombre del ticket ya ha sido mapeado a un código de barras para este supermercado."""
-    if not DATABASE_URL:
-        return None
+def db_get_barcode_by_mapping(db: Session, supermarket: str, raw_ticket_name: str) -> str | None:
+    """Busca si un nombre del ticket ya ha sido mapeado a un barcode para este supermercado."""
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT barcode FROM ticket_product_mappings
-            WHERE lower(supermarket) = lower(%s) AND lower(raw_ticket_name) = lower(%s)
-        """, (supermarket.strip(), raw_ticket_name.strip()))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return row[0] if row else None
+        m = (
+            db.query(MapeoTicketProducto)
+            .filter(
+                MapeoTicketProducto.supermarket == supermarket.strip().lower(),
+                MapeoTicketProducto.raw_ticket_name == raw_ticket_name.strip().lower(),
+            )
+            .first()
+        )
+        return m.barcode if m else None
     except Exception as e:
         print(f"[DB] Error looking up ticket mapping: {e}")
         return None
 
-def db_save_ticket_mapping(supermarket: str, raw_ticket_name: str, barcode: str):
+def db_save_ticket_mapping(db: Session, supermarket: str, raw_ticket_name: str, barcode: str):
     """Guarda un mapeo de nombre de ticket a código de barras para un supermercado."""
-    if not DATABASE_URL:
-        return
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO ticket_product_mappings (supermarket, raw_ticket_name, barcode)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (supermarket, raw_ticket_name) DO UPDATE
-              SET barcode = EXCLUDED.barcode
-        """, (supermarket.strip(), raw_ticket_name.strip(), barcode.strip()))
-        conn.commit()
-        cur.close()
-        conn.close()
+        sm = supermarket.strip().lower()
+        rtn = raw_ticket_name.strip().lower()
+        existing = (
+            db.query(MapeoTicketProducto)
+            .filter(MapeoTicketProducto.supermarket == sm, MapeoTicketProducto.raw_ticket_name == rtn)
+            .first()
+        )
+        if existing:
+            existing.barcode = barcode.strip()
+        else:
+            db.add(MapeoTicketProducto(supermarket=sm, raw_ticket_name=rtn, barcode=barcode.strip()))
+        db.commit()
         print(f"[DB] Mapeo guardado: [{supermarket}] '{raw_ticket_name}' -> Barcode '{barcode}'")
     except Exception as e:
+        db.rollback()
         print(f"[DB] Error saving ticket mapping: {e}")
-
-# ── Fallback en memoria (si no hay DB) ────────────────────────────────────────
-MEM_TICKET_MAPPINGS = {}
-
-def get_ticket_mapping(supermarket: str, raw_ticket_name: str) -> str | None:
-    """Busca un mapeo en BBDD o en memoria si no hay BBDD."""
-    barcode = db_get_barcode_by_mapping(supermarket, raw_ticket_name)
-    if barcode:
-        return barcode
-    return MEM_TICKET_MAPPINGS.get((supermarket.lower().strip(), raw_ticket_name.lower().strip()))
-
-def save_ticket_mapping(supermarket: str, raw_ticket_name: str, barcode: str):
-    """Guarda un mapeo en BBDD o en memoria si no hay BBDD."""
-    if DATABASE_URL:
-        db_save_ticket_mapping(supermarket, raw_ticket_name, barcode)
-    else:
-        MEM_TICKET_MAPPINGS[(supermarket.lower().strip(), raw_ticket_name.lower().strip())] = barcode
-        print(f"[Memory] Mapeo guardado: [{supermarket}] '{raw_ticket_name}' -> Barcode '{barcode}'")
-
-MEM_CATALOG = [(b, n, c) for b, n, c in SEED_CATALOG]
-
-def mem_search(q: str) -> list:
-    nq = normalize(q)
-    return [{"barcode": b, "name": n, "category": c, "allowed": True}
-            for b, n, c in MEM_CATALOG if nq in normalize(n)]
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
@@ -657,7 +574,7 @@ async def scan_product(request: Request, barcode: str = Form(...), db: Session =
         return JSONResponse(status_code=403, content={"error": "Acceso denegado. Token inválido."})
 
     # 1. Buscar en DB
-    product = db_get_by_barcode(barcode)
+    product = db_get_by_barcode(db, barcode)
     if product:
         return {"name": product["name"], "allowed": product["allowed"]}
 
@@ -666,13 +583,8 @@ async def scan_product(request: Request, barcode: str = Form(...), db: Session =
 
     # 3. Guardar en DB para futuros escaneos
     if "Error" not in info.get("name", "Error") and "desconocido" not in info.get("name", ""):
-        db_upsert_product(
-            barcode=barcode,
-            name=info["name"],
-            category="unknown",
-            allowed=info["allowed"],
-            source="off"
-        )
+        db_upsert_product(db, barcode=barcode, name=info["name"], category="unknown",
+                          allowed=info["allowed"], source="off")
     return info
 
 @app.post("/scan/manual", summary="Adición Manual al Carrito", description="Permite al beneficiario agregar de forma manual referencias de productos sin código de barras al carrito virtual.", tags=["[BENEFICIARIO] Aplicación Móvil"])
@@ -681,16 +593,13 @@ async def scan_manual(product_name: str = Form(...), price: float = Form(...)):
     return {"status": "success", "name": product_name, "price": price}
 
 @app.get("/api/search", summary="Buscador Predictivo de Productos", description="Buscador instantáneo en el catálogo del supermercado seleccionado que se auto-enriquece de forma síncrona consultando fuentes externas.", tags=["[BENEFICIARIO] Aplicación Móvil"])
-async def search_products(q: str, supermarket: str = Query(default=None)):
+async def search_products(q: str, supermarket: str = Query(default=None), db: Session = Depends(get_db)):
     """Búsqueda en DB (instantánea). Enriquece con OFF si responde en <2s."""
     if not q or len(q.strip()) < 2:
         return {"products": []}
 
-    # 1. Buscar en DB (o en memoria si no hay DB)
-    if DATABASE_URL:
-        db_results = db_search(q, supermarket)
-    else:
-        db_results = mem_search(q)
+    # 1. Buscar en BD
+    db_results = db_search(db, q, supermarket)
 
     # 2. Intentar enriquecer con OFF (timeout corto)
     try:
@@ -711,7 +620,7 @@ async def search_products(q: str, supermarket: str = Query(default=None)):
     except Exception:
         pass
 
-    return {"products": db_results, "source": "db" if DATABASE_URL else "memory"}
+    return {"products": db_results, "source": "db"}
 
 # ── Admin: Catálogo de Productos ───────────────────────────────────────────────
 
@@ -729,7 +638,7 @@ async def list_products(request: Request, supermarket: str = Query(default=None)
     admin = await get_current_admin(request, db)
     if not admin:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
-    return {"products": db_all_products(supermarket)}
+    return {"products": db_all_products(db, supermarket)}
 
 @app.post(
     "/api/admin/products",
@@ -755,23 +664,22 @@ async def add_product(
     admin = await get_current_admin(request, db)
     if not admin:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
-    db_upsert_product(barcode, name, category, allowed, source="manual")
+    db_upsert_product(db, barcode, name, category, allowed, source="manual")
 
     # Si se especifica supermercado, asociarlo también
-    if supermarket and DATABASE_URL:
+    if supermarket:
         try:
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO supermarket_products (supermarket, barcode, price_ref)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (supermarket, barcode)
-                DO UPDATE SET price_ref = EXCLUDED.price_ref, available = TRUE
-            """, (supermarket, barcode, price_ref))
-            conn.commit()
-            cur.close()
-            conn.close()
+            existing_sg = db.query(PSGModel).filter(
+                PSGModel.supermarket == supermarket, PSGModel.barcode == barcode
+            ).first()
+            if existing_sg:
+                existing_sg.price_ref = price_ref
+                existing_sg.available = True
+            else:
+                db.add(PSGModel(supermarket=supermarket, barcode=barcode, price_ref=price_ref))
+            db.commit()
         except Exception as e:
+            db.rollback()
             return JSONResponse(status_code=500, content={"error": str(e)})
 
     return {"status": "ok", "barcode": barcode, "name": name}
@@ -792,17 +700,14 @@ async def delete_product(barcode: str, request: Request, db: Session = Depends(g
     admin = await get_current_admin(request, db)
     if not admin:
         return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
-    if not DATABASE_URL:
-        return {"status": "no_db"}
     try:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM products WHERE barcode = %s", (barcode,))
-        conn.commit()
-        cur.close()
-        conn.close()
+        deleted = db.query(Producto).filter(Producto.barcode == barcode).delete()
+        db.commit()
+        if not deleted:
+            return JSONResponse(status_code=404, content={"error": "Producto no encontrado."})
         return {"status": "deleted"}
     except Exception as e:
+        db.rollback()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 # ── Supermercado: Mantenimiento de Productos ──────────────────────────────────
@@ -1191,7 +1096,7 @@ async def upload_ticket(
                 db_price = float(local_prod.precio)
             else:
                 # If not found locally, check if global lookup finds it
-                global_prod = db_get_by_barcode(barcode)
+                global_prod = db_get_by_barcode(db, barcode)
                 if global_prod and global_prod.get("price_ref") is not None:
                     db_price = float(global_prod["price_ref"])
                 else:
@@ -1243,7 +1148,7 @@ async def upload_ticket(
         cart_items=parsed_cart_items,
         cart_total=cart_total,
         ticket_data=ticket_data,
-        get_mapping_func=get_ticket_mapping,
+        get_mapping_func=lambda sm, name: db_get_barcode_by_mapping(db, sm, name),
         supermarket=supermarket
     )
     report["using_fallback"] = using_fallback
@@ -1252,7 +1157,8 @@ async def upload_ticket(
     # 4. Save learned mappings if validated successfully
     if report["status"] == "validated":
         for mapping in report.get("learned_mappings", []):
-            save_ticket_mapping(
+            db_save_ticket_mapping(
+                db,
                 supermarket=mapping["supermarket"],
                 raw_ticket_name=mapping["raw_name"],
                 barcode=mapping["barcode"]

@@ -4,8 +4,8 @@ python-multipart
 pillow
 requests
 jinja2
-psycopg2-binary
 google-generativeai
+psycopg2-binary
 sqlalchemy
 pyotp
 slowapi
