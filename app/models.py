@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR, Boolean, CheckConstraint
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, Integer, JSON, CHAR, Boolean, CheckConstraint, UniqueConstraint
 from sqlalchemy.types import TypeDecorator
 from app.database import Base
 
@@ -145,3 +145,42 @@ class AdminSession(Base):
     mfa_verified = Column(Boolean, default=False, nullable=False)
     expires = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class Producto(Base):
+    """Catálogo global de productos (antes tabla 'products' gestionada por psycopg2)."""
+    __tablename__ = 'products'
+
+    barcode = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=True)
+    allowed = Column(Boolean, default=True, nullable=False)
+    source = Column(String, default='manual', nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class ProductoSupermercadoGlobal(Base):
+    """Disponibilidad y precio de referencia por supermercado (antes 'supermarket_products')."""
+    __tablename__ = 'supermarket_products'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    supermarket = Column(String, nullable=False, index=True)
+    barcode = Column(String, ForeignKey('products.barcode', ondelete='CASCADE'), nullable=False, index=True)
+    price_ref = Column(Numeric(10, 2), nullable=True)
+    available = Column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('supermarket', 'barcode', name='uq_supermarket_barcode'),
+    )
+
+class MapeoTicketProducto(Base):
+    """Mapeos aprendidos de nombres de ticket a códigos de barras (antes 'ticket_product_mappings')."""
+    __tablename__ = 'ticket_product_mappings'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    supermarket = Column(String, nullable=False, index=True)
+    raw_ticket_name = Column(String, nullable=False, index=True)
+    barcode = Column(String, ForeignKey('products.barcode', ondelete='CASCADE'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('supermarket', 'raw_ticket_name', name='uq_supermarket_ticket_name'),
+    )
