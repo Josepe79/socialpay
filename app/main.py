@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, File, UploadFile, Form, Query, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import logging
 
@@ -33,6 +32,10 @@ from logic.validator import TicketValidator
 from sqlalchemy.orm import Session
 from app.database import get_db, engine
 from app.models import Base, ProductoSupermercado as PSModel, Usuario as UserModel, AuditoriaTransaccion as ATModel, AsignacionFondosGestor as AFGModel
+from app.sessions import create_session as db_create_session, get_session as db_get_session, mark_mfa_verified, delete_session as db_delete_session
+from app.security import limiter, generate_csrf_token, validate_csrf_token
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 from pydantic import BaseModel
 from typing import List, Optional, Union
 
@@ -50,10 +53,10 @@ def parse_spanish_float(val) -> float:
 import hashlib
 import secrets
 import pyotp
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ── Sistema de Sesiones y Seguridad (MFA / PBKDF2) ────────────────────────────
-ADMIN_SESSIONS = {} # Token -> { "user_id": UUID, "mfa_verified": bool, "expires": datetime }
+# Sesiones migradas a BD (tabla admin_sessions). Ver app/sessions.py
 
 def hash_password(password: str, salt: str = None) -> str:
     """Genera un hash seguro PBKDF2-SHA256 con sal para almacenar contraseñas."""
@@ -73,18 +76,14 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 async def get_current_user_by_roles(request: Request, allowed_roles: List[str], db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
-    if not session_token or session_token not in ADMIN_SESSIONS:
+    if not session_token:
         return None
-    
-    sess = ADMIN_SESSIONS[session_token]
-    if datetime.now() > sess["expires"]:
-        ADMIN_SESSIONS.pop(session_token, None)
+
+    sess = db_get_session(db, session_token)
+    if not sess or not sess.mfa_verified:
         return None
-        
-    if not sess["mfa_verified"]:
-        return None
-        
-    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+
+    user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
     if not user:
         return None
         
@@ -126,6 +125,8 @@ app = FastAPI(
     description="API gubernamental y corporativa para la gestión segregada de roles, carga batch de catálogos de supermercados, asignación de fondos de cohesión social FSE+ y validación automatizada de tickets de compra mediante visión artificial por OCR, garantizando cumplimiento financiero y RGPD.",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Paths setup
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -134,9 +135,6 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 matcher = ProductMatcher()
-
-# ── Auditoría en memoria (persiste mientras el proceso esté vivo) ─────────────
-db_auditoria = []
 
 # ── PostgreSQL ─────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -283,9 +281,7 @@ def init_db():
             recreate_needed = True
             
         if recreate_needed:
-            print("[DB] Recreando tablas para actualizar esquema...")
-            Base.metadata.drop_all(bind=engine)
-            print("[DB] Tablas antiguas eliminadas con éxito.")
+            print("[DB] ADVERTENCIA: Columnas faltantes detectadas. Se recomienda ejecutar una migración manual con Alembic.")
 
         # Crear tablas SQLAlchemy (Usuario, ProductoSupermercado, AuditoriaTransaccion, AsignacionFondosGestor)
         print("[DB] Inicializando tablas SQLAlchemy...")
@@ -593,11 +589,14 @@ async def read_root(
         user = db.query(UserModel).filter(UserModel.token_anonimo == token_val.strip()).first()
         
     if not user:
-        return templates.TemplateResponse(
+        csrf_token = generate_csrf_token()
+        resp = templates.TemplateResponse(
             request=request,
             name="beneficiary_login.html",
-            context={"request": request, "error": "Token no válido o no proporcionado" if token_val else None}
+            context={"request": request, "error": "Token no válido o no proporcionado" if token_val else None, "csrf_token": csrf_token}
         )
+        resp.set_cookie("csrf_token", csrf_token, httponly=False, samesite="strict", secure=True)
+        return resp
         
     response = templates.TemplateResponse(
         request=request,
@@ -608,19 +607,34 @@ async def read_root(
     return response
 
 @app.post("/beneficiario/login", summary="Iniciar Sesión del Beneficiario", description="Autentica al beneficiario en la aplicación utilizando su código de acceso único o token anónimo, configurando una cookie HTTPOnly.", tags=["[BENEFICIARIO] Aplicación Móvil"])
+@limiter.limit("10/minute")
 async def process_beneficiary_login(
     request: Request,
     token: str = Form(...),
+    csrf_token: str = Form(default=""),
     db: Session = Depends(get_db)
 ):
+    if not validate_csrf_token(csrf_token, request.cookies.get("csrf_token", "")):
+        csrf_new = generate_csrf_token()
+        resp = templates.TemplateResponse(
+            request=request,
+            name="beneficiary_login.html",
+            context={"request": request, "error": "Token de seguridad inválido. Recarga la página.", "csrf_token": csrf_new}
+        )
+        resp.set_cookie("csrf_token", csrf_new, httponly=False, samesite="strict", secure=True)
+        return resp
+
     token_val = token.strip()
     user = db.query(UserModel).filter(UserModel.token_anonimo == token_val).first()
     if not user:
-        return templates.TemplateResponse(
+        csrf_new = generate_csrf_token()
+        resp = templates.TemplateResponse(
             request=request,
             name="beneficiary_login.html",
-            context={"request": request, "error": "Código de acceso no válido.", "entered_token": token_val}
+            context={"request": request, "error": "Código de acceso no válido.", "entered_token": token_val, "csrf_token": csrf_new}
         )
+        resp.set_cookie("csrf_token", csrf_new, httponly=False, samesite="strict", secure=True)
+        return resp
         
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(key="beneficiary_token", value=user.token_anonimo, httponly=True)
@@ -633,8 +647,15 @@ async def beneficiary_logout():
     return response
 
 @app.post("/scan-product", summary="Escaneo de Código de Barras", description="Procesa y busca un código de barras en el catálogo del sistema. Si no existe, realiza una consulta automatizada a Open Food Facts y lo aprende de forma dinámica.", tags=["[BENEFICIARIO] Aplicación Móvil"])
-async def scan_product(barcode: str = Form(...)):
+async def scan_product(request: Request, barcode: str = Form(...), db: Session = Depends(get_db)):
     """Busca producto en DB → caché en memoria → OFF. Guarda lo que aprende."""
+    beneficiary_token = request.cookies.get("beneficiary_token")
+    if not beneficiary_token:
+        return JSONResponse(status_code=403, content={"error": "Acceso denegado. Beneficiario no autenticado."})
+    user = db.query(UserModel).filter(UserModel.token_anonimo == beneficiary_token.strip()).first()
+    if not user:
+        return JSONResponse(status_code=403, content={"error": "Acceso denegado. Token inválido."})
+
     # 1. Buscar en DB
     product = db_get_by_barcode(barcode)
     if product:
@@ -704,8 +725,10 @@ async def search_products(q: str, supermarket: str = Query(default=None)):
         403: {"description": "Acceso denegado. Privilegios insuficientes o sesión no válida."}
     }
 )
-async def list_products(supermarket: str = Query(default=None)):
-    """Lista todos los productos, opcionalmente filtrados por supermercado."""
+async def list_products(request: Request, supermarket: str = Query(default=None), db: Session = Depends(get_db)):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
     return {"products": db_all_products(supermarket)}
 
 @app.post(
@@ -720,14 +743,18 @@ async def list_products(supermarket: str = Query(default=None)):
     }
 )
 async def add_product(
+    request: Request,
     barcode: str = Form(...),
     name: str = Form(...),
     category: str = Form(default="unknown"),
     allowed: bool = Form(default=True),
     supermarket: str = Form(default=None),
-    price_ref: float = Form(default=None)
+    price_ref: float = Form(default=None),
+    db: Session = Depends(get_db)
 ):
-    """Añade o actualiza un producto en el catálogo."""
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
     db_upsert_product(barcode, name, category, allowed, source="manual")
 
     # Si se especifica supermercado, asociarlo también
@@ -761,8 +788,10 @@ async def add_product(
         500: {"description": "Error interno al procesar la eliminación."}
     }
 )
-async def delete_product(barcode: str):
-    """Elimina un producto del catálogo."""
+async def delete_product(barcode: str, request: Request, db: Session = Depends(get_db)):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
     if not DATABASE_URL:
         return {"status": "no_db"}
     try:
@@ -1120,6 +1149,7 @@ def ocr_ticket_via_gemini(image_path: Path, cart_items: list, supermarket: str) 
         403: {"description": "Acceso denegado. Beneficiario no autenticado."}
     }
 )
+@limiter.limit("3/minute")
 async def upload_ticket(
     request: Request,
     ticket: UploadFile = File(...),
@@ -1189,7 +1219,9 @@ async def upload_ticket(
             content={"error": f"Saldo insuficiente. Saldo disponible: €{float(user.saldo_disponible):.2f}"}
         )
 
-    file_path = UPLOAD_DIR / ticket.filename
+    file_ext = Path(ticket.filename).suffix.lower() if ticket.filename else ".jpg"
+    safe_ext = file_ext if file_ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"} else ".jpg"
+    file_path = UPLOAD_DIR / f"{uuid.uuid4()}{safe_ext}"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(ticket.file, buffer)
 
@@ -1241,19 +1273,6 @@ async def upload_ticket(
         db.commit()
         db.refresh(new_audit)
 
-        audit_record = {
-            "transaction_id": str(new_audit.id),
-            "user_id": user.token_anonimo,
-            "supermarket": supermarket,
-            "timestamp": new_audit.timestamp.isoformat(),
-            "cart_snapshot": parsed_cart_items,
-            "ticket_image_path": str(file_path.absolute()),
-            "status": "AUDITED_AND_APPROVED",
-            "validation_score": report["score"],
-            "ticket_total": report["ticket_total"]
-        }
-        db_auditoria.append(audit_record)
-
     return report
 
 @app.get(
@@ -1266,8 +1285,25 @@ async def upload_ticket(
         403: {"description": "Acceso denegado. Rol no autorizado."}
     }
 )
-async def get_audit_logs():
-    return JSONResponse(content={"total_records": len(db_auditoria), "logs": db_auditoria})
+async def get_audit_logs(request: Request, db: Session = Depends(get_db)):
+    admin = await get_current_admin(request, db)
+    if not admin:
+        return JSONResponse(status_code=403, content={"error": "Acceso no autorizado."})
+
+    logs = db.query(ATModel).order_by(ATModel.timestamp.desc()).all()
+    return JSONResponse(content={
+        "total_records": len(logs),
+        "logs": [
+            {
+                "transaction_id": str(l.id),
+                "user_id": str(l.usuario_uuid) if l.usuario_uuid else None,
+                "supermarket": l.supermercado_id,
+                "total": float(l.total),
+                "timestamp": l.timestamp.isoformat(),
+                "status": l.estado
+            } for l in logs
+        ]
+    })
 
 # Pydantic schemas for User Management CRUD
 class BeneficiarySchema(BaseModel):
@@ -1991,19 +2027,6 @@ async def crear_gestor(
         f"[COMPLIANCE FSE+] Gestor Social creado con éxito. Creador (Up Spain ID): {current_user.id}, Gestor ID: {new_gestor_id}, CIF: {cif_val}, Proyecto FSE: {codigo_proyecto_val}, Presupuesto: €{presupuesto_val}"
     )
     
-    audit_record = {
-        "event": "CREATE_GESTOR_AUDIT",
-        "timestamp": created_at_time.isoformat(),
-        "created_by_upspain_id": str(current_user.id),
-        "gestor_id": str(new_gestor_id),
-        "nombre_institucion": nombre_val,
-        "cif": cif_val,
-        "proyecto_fse": codigo_proyecto_val,
-        "presupuesto_inicial": presupuesto_val,
-        "tasa_cofinanciacion": tasa_val
-    }
-    db_auditoria.append(audit_record)
-    
     return {
         "status": "created",
         "gestor": {
@@ -2289,13 +2312,14 @@ import urllib.parse
     description="Renderiza el formulario de inicio de sesión para el personal de administración y supervisores. Si la sesión ya es válida y tiene MFA verificado, redirige al dashboard correspondiente.",
     tags=["[ADMIN] Administración Global"]
 )
+@limiter.limit("20/minute")
 async def login_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     # Si ya tiene sesión autenticada y verificada por MFA, redirigir directo al dashboard
     session_token = request.cookies.get("session_token")
-    if session_token and session_token in ADMIN_SESSIONS:
-        sess = ADMIN_SESSIONS[session_token]
-        if sess["mfa_verified"] and datetime.now() < sess["expires"]:
-            user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+    if session_token:
+        sess = db_get_session(db, session_token)
+        if sess and sess.mfa_verified:
+            user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
             if user:
                 redirect_urls = {
                     "admin": "/admin/dashboard",
@@ -2304,11 +2328,14 @@ async def login_page(request: Request, error: Optional[str] = None, db: Session 
                     "supermercado": "/supermercado/dashboard"
                 }
                 return RedirectResponse(url=redirect_urls.get(user.rol, "/admin/dashboard"), status_code=303)
-    return templates.TemplateResponse(
+    csrf_token = generate_csrf_token()
+    response = templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"request": request, "state": "login", "error": error}
+        context={"request": request, "state": "login", "error": error, "csrf_token": csrf_token}
     )
+    response.set_cookie("csrf_token", csrf_token, httponly=False, samesite="strict", secure=True)
+    return response
 
 @app.post(
     "/admin/login",
@@ -2316,12 +2343,19 @@ async def login_page(request: Request, error: Optional[str] = None, db: Session 
     description="Valida las credenciales de email y contraseña (hash PBKDF2) del personal. Si son correctas, crea una sesión temporal no verificada y redirige a la configuración o verificación de MFA.",
     tags=["[ADMIN] Administración Global"]
 )
+@limiter.limit("5/minute")
 async def process_login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(default=""),
     db: Session = Depends(get_db)
 ):
+    if not validate_csrf_token(csrf_token, request.cookies.get("csrf_token", "")):
+        return RedirectResponse(
+            url="/admin/login?error=" + urllib.parse.quote("Token de seguridad inválido. Recarga la página."),
+            status_code=303
+        )
     try:
         # Buscar el usuario de personal del sistema
         user = db.query(UserModel).filter(UserModel.email == email.strip()).first()
@@ -2338,18 +2372,13 @@ async def process_login(
                 status_code=303
             )
             
-        # Crear sesión temporal (mfa_verified = False)
-        session_token = secrets.token_hex(32)
-        ADMIN_SESSIONS[session_token] = {
-            "user_id": user.id,
-            "mfa_verified": False,
-            "expires": datetime.now() + timedelta(minutes=5)
-        }
-        
+        # Crear sesión temporal persistente en BD (mfa_verified = False)
+        session_token = db_create_session(db, user.id, mfa_verified=False, ttl_minutes=5)
+
         # Redirigir a setup si el QR no ha sido escaneado aún, de lo contrario a verificación
         next_url = "/admin/setup-mfa" if not user.mfa_enabled else "/admin/verify-mfa"
         response = RedirectResponse(url=next_url, status_code=303)
-        response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False)
+        response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="lax")
         return response
     except Exception as e:
         print(f"[AUTH ERROR] Error in process_login: {e}")
@@ -2369,11 +2398,14 @@ async def process_login(
 )
 async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
-    if not session_token or session_token not in ADMIN_SESSIONS:
+    if not session_token:
         return RedirectResponse(url="/admin/login", status_code=303)
-        
-    sess = ADMIN_SESSIONS[session_token]
-    user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+
+    sess = db_get_session(db, session_token)
+    if not sess:
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
     if not user:
         return RedirectResponse(url="/admin/login", status_code=303)
         
@@ -2385,7 +2417,8 @@ async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Sess
     provisioning_uri = totp.provisioning_uri(name=user.email, issuer_name="SocialPay")
     qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(provisioning_uri)}"
     
-    return templates.TemplateResponse(
+    csrf_token = generate_csrf_token()
+    response = templates.TemplateResponse(
         request=request,
         name="login.html",
         context={
@@ -2393,9 +2426,12 @@ async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Sess
             "state": "setup",
             "qr_url": qr_url,
             "secret_key": user.mfa_secret,
-            "error": error
+            "error": error,
+            "csrf_token": csrf_token
         }
     )
+    response.set_cookie("csrf_token", csrf_token, httponly=False, samesite="strict", secure=True)
+    return response
 
 @app.post(
     "/admin/setup-mfa",
@@ -2403,30 +2439,39 @@ async def setup_mfa_page(request: Request, error: Optional[str] = None, db: Sess
     description="Recibe el código TOTP inicial para verificar y activar de forma permanente el segundo factor de autenticación (MFA) para la cuenta de personal.",
     tags=["[ADMIN] Administración Global"]
 )
+@limiter.limit("10/minute")
 async def process_setup_mfa(
     request: Request,
     code: str = Form(...),
+    csrf_token: str = Form(default=""),
     db: Session = Depends(get_db)
 ):
+    if not validate_csrf_token(csrf_token, request.cookies.get("csrf_token", "")):
+        return RedirectResponse(
+            url="/admin/setup-mfa?error=" + urllib.parse.quote("Token de seguridad inválido. Recarga la página."),
+            status_code=303
+        )
     try:
         session_token = request.cookies.get("session_token")
-        if not session_token or session_token not in ADMIN_SESSIONS:
+        if not session_token:
             return RedirectResponse(url="/admin/login", status_code=303)
-            
-        sess = ADMIN_SESSIONS[session_token]
-        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+
+        sess = db_get_session(db, session_token)
+        if not sess:
+            return RedirectResponse(url="/admin/login", status_code=303)
+
+        user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
         if not user or user.mfa_enabled:
             return RedirectResponse(url="/admin/login", status_code=303)
-            
+
         # Validar código TOTP de 6 dígitos ingresado por el usuario
         totp = pyotp.TOTP(user.mfa_secret)
         if totp.verify(code.strip()):
             user.mfa_enabled = True
             db.commit()
-            
-            # Validar la sesión
-            sess["mfa_verified"] = True
-            sess["expires"] = datetime.now() + timedelta(hours=2)
+
+            # Marcar sesión como verificada por MFA en BD
+            mark_mfa_verified(db, session_token, ttl_hours=2)
             
             # Redirección dinámica según rol
             redirect_urls = {
@@ -2460,12 +2505,15 @@ async def process_setup_mfa(
 )
 async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
-    if not session_token or session_token not in ADMIN_SESSIONS:
+    if not session_token:
         return RedirectResponse(url="/admin/login", status_code=303)
-        
-    sess = ADMIN_SESSIONS[session_token]
-    if sess["mfa_verified"]:
-        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+
+    sess = db_get_session(db, session_token)
+    if not sess:
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    if sess.mfa_verified:
+        user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
         if user:
             redirect_urls = {
                 "admin": "/admin/dashboard",
@@ -2475,11 +2523,14 @@ async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Ses
             }
             return RedirectResponse(url=redirect_urls.get(user.rol, "/admin/dashboard"), status_code=303)
         
-    return templates.TemplateResponse(
+    csrf_token = generate_csrf_token()
+    response = templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"request": request, "state": "verify", "error": error}
+        context={"request": request, "state": "verify", "error": error, "csrf_token": csrf_token}
     )
+    response.set_cookie("csrf_token", csrf_token, httponly=False, samesite="strict", secure=True)
+    return response
 
 @app.post(
     "/admin/verify-mfa",
@@ -2487,25 +2538,34 @@ async def verify_mfa_page(request: Request, error: Optional[str] = None, db: Ses
     description="Verifica el código de un solo uso TOTP. Si es correcto, marca la sesión como verificada por MFA y amplía su expiración, redirigiendo al dashboard respectivo.",
     tags=["[ADMIN] Administración Global"]
 )
+@limiter.limit("10/minute")
 async def process_verify_mfa(
     request: Request,
     code: str = Form(...),
+    csrf_token: str = Form(default=""),
     db: Session = Depends(get_db)
 ):
+    if not validate_csrf_token(csrf_token, request.cookies.get("csrf_token", "")):
+        return RedirectResponse(
+            url="/admin/verify-mfa?error=" + urllib.parse.quote("Token de seguridad inválido. Recarga la página."),
+            status_code=303
+        )
     try:
         session_token = request.cookies.get("session_token")
-        if not session_token or session_token not in ADMIN_SESSIONS:
+        if not session_token:
             return RedirectResponse(url="/admin/login", status_code=303)
-            
-        sess = ADMIN_SESSIONS[session_token]
-        user = db.query(UserModel).filter(UserModel.id == sess["user_id"]).first()
+
+        sess = db_get_session(db, session_token)
+        if not sess:
+            return RedirectResponse(url="/admin/login", status_code=303)
+
+        user = db.query(UserModel).filter(UserModel.id == sess.user_id).first()
         if not user:
             return RedirectResponse(url="/admin/login", status_code=303)
-            
+
         totp = pyotp.TOTP(user.mfa_secret)
         if totp.verify(code.strip()):
-            sess["mfa_verified"] = True
-            sess["expires"] = datetime.now() + timedelta(hours=2)
+            mark_mfa_verified(db, session_token, ttl_hours=2)
             
             # Redirección dinámica según rol
             redirect_urls = {
@@ -2536,10 +2596,10 @@ async def process_verify_mfa(
     description="Invalida el token de sesión de personal en la memoria del servidor y elimina la cookie de sesión del navegador, redirigiendo al login.",
     tags=["[ADMIN] Administración Global"]
 )
-async def logout(request: Request):
+async def logout(request: Request, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
     if session_token:
-        ADMIN_SESSIONS.pop(session_token, None)
+        db_delete_session(db, session_token)
     response = RedirectResponse(url="/admin/login", status_code=303)
     response.delete_cookie("session_token")
     return response

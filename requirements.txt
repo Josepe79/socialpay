@@ -8,5 +8,7 @@ psycopg2-binary
 google-generativeai
 sqlalchemy
 pyotp
+slowapi
+itsdangerous
 
 

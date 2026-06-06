@@ -256,6 +256,7 @@
     {% if state == "login" %}
         <!-- FORMULARIO DE LOGIN -->
         <form method="POST" action="/admin/login">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="email">Email Corporativo</label>
                 <input type="email" id="email" name="email" required placeholder="ejemplo@jepco.es">
@@ -269,6 +270,7 @@
     {% elif state == "setup" %}
         <!-- CONFIGURACIÓN INICIAL DE MFA (QR) -->
         <form method="POST" action="/admin/setup-mfa">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <p class="helper-text">
                 Escanea el código QR desde tu aplicación de doble factor o introduce la clave secreta manualmente:
             </p>
@@ -285,6 +287,7 @@
     {% else %}
         <!-- VERIFICACIÓN DE MFA EN LOGINS POSTERIORES -->
         <form method="POST" action="/admin/verify-mfa">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <p class="helper-text" style="text-align: center;">
                 Introduce el código de 6 dígitos generado por tu aplicación móvil para completar el acceso.
             </p>

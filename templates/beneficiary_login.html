@@ -219,6 +219,7 @@
         {% endif %}
 
         <form action="/beneficiario/login" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="token">Código de Acceso Anónimo</label>
                 <div class="input-wrapper">
